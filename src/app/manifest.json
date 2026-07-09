@@ -1,6 +1,6 @@
 {
-  "name": "MyWebSite",
-  "short_name": "MySite",
+  "name": "Cagie",
+  "short_name": "Cagie",
   "icons": [
     {
       "src": "/web-app-manifest-192x192.png",
