@@ -104,11 +104,11 @@ export default function NotesPage() {
   };
 
   if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+    return <div className="min-h-[100dvh] flex items-center justify-center">Loading...</div>;
   }
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:24px_24px] relative overflow-hidden" ref={boardRef}>
+    <div className="min-h-[100dvh] bg-[#f8fafc] bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:24px_24px] relative overflow-hidden" ref={boardRef}>
       
       {/* Header */}
       <div className="absolute top-0 left-0 right-0 p-6 z-10 pointer-events-none">

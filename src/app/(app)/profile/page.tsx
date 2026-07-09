@@ -92,7 +92,7 @@ export default function ProfilePage() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50">
+    <div className="flex flex-col min-h-[100dvh] bg-gray-50">
       <div className="px-6 py-8 bg-white border-b border-gray-100 shadow-sm">
         <h1 className="text-2xl font-bold text-gray-900">Your Profile</h1>
         <p className="text-gray-500 text-sm mt-1">

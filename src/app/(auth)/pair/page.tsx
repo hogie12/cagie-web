@@ -126,7 +126,7 @@ export default function PairPage() {
   if (loading) return null;
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4 relative overflow-hidden">
+    <div className="min-h-[100dvh] flex items-center justify-center bg-background p-4 relative overflow-hidden">
       <button 
         onClick={handleLogout}
         className="absolute top-4 right-4 flex items-center gap-2 px-4 py-2 bg-card border border-border hover:bg-muted backdrop-blur-sm rounded-full text-sm font-medium text-destructive transition-colors z-20 shadow-sm"

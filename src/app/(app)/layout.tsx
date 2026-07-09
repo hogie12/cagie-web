@@ -21,7 +21,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <CoupleDataProvider>
-      <div className="min-h-screen bg-background text-foreground pb-20">
+      <div className="min-h-[100dvh] bg-background text-foreground pb-20">
         {children}
         
         {/* Bottom Nav for Mobile */}
