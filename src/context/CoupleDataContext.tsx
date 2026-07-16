@@ -16,6 +16,7 @@ export interface CalendarEvent {
   owner: EventOwner;
   ownerId?: string; // UID of the user who created it
   categoryId?: string;
+  description?: string;
 }
 
 export interface StickyNote {

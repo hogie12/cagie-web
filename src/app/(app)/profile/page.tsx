@@ -2,9 +2,8 @@
 
 import { useState, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { auth, db, storage } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import { doc, updateDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -54,10 +53,27 @@ export default function ProfilePage() {
       let newPhotoURL = userPhotoURL;
 
       if (selectedFile) {
-        // Upload to Firebase Storage
-        const fileRef = ref(storage, `users/${user.uid}/profile_${Date.now()}`);
-        await uploadBytes(fileRef, selectedFile);
-        newPhotoURL = await getDownloadURL(fileRef);
+        // Upload to Cloudinary
+        const formData = new FormData();
+        formData.append("file", selectedFile);
+        formData.append("upload_preset", "cagie-project");
+
+        const res = await fetch(
+          `https://api.cloudinary.com/v1_1/xcp1rumz/image/upload`,
+          {
+            method: "POST",
+            body: formData,
+          },
+        );
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(
+            data.error?.message || "Failed to upload image to Cloudinary",
+          );
+        }
+
+        newPhotoURL = data.secure_url;
       }
 
       // Update Firestore
@@ -92,7 +108,7 @@ export default function ProfilePage() {
   };
 
   return (
-    <div className="flex flex-col min-h-[100dvh] bg-gray-50">
+    <div className="flex flex-col h-full overflow-y-auto bg-gray-50 pb-[80px] md:pb-0">
       <div className="px-6 py-8 bg-white border-b border-gray-100 shadow-sm">
         <h1 className="text-2xl font-bold text-gray-900">Your Profile</h1>
         <p className="text-gray-500 text-sm mt-1">

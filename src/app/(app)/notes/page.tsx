@@ -142,7 +142,7 @@ export default function NotesPage() {
 
   return (
     <div
-      className="min-h-[100dvh] bg-[#f8fafc] bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:24px_24px] relative overflow-hidden"
+      className="h-full bg-[#f8fafc] bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:24px_24px] relative overflow-hidden"
       ref={boardRef}
     >
       {/* Header */}
