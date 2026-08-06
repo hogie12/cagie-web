@@ -24,6 +24,7 @@ export default function ProfilePage() {
     partnerName,
     partnerPhotoURL,
     coupleId,
+    requestNotificationPermission,
   } = useAuth();
   const router = useRouter();
 
@@ -285,6 +286,27 @@ export default function ProfilePage() {
             </div>
           </div>
         )}
+
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-gray-900">Push Notifications</h3>
+            <p className="text-sm text-gray-500 mt-1">Get alerts for new greetings & photos</p>
+          </div>
+          <button 
+            onClick={async () => {
+              try {
+                await requestNotificationPermission();
+                setMessage("Notifications enabled!");
+                setTimeout(() => setMessage(""), 3000);
+              } catch (e) {
+                setMessage("Failed to enable notifications");
+              }
+            }}
+            className="px-4 py-2 bg-primary/10 text-primary font-medium rounded-xl hover:bg-primary/20 transition-colors"
+          >
+            Enable
+          </button>
+        </div>
 
         <button
           onClick={handleLogout}
