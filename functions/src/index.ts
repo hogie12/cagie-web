@@ -15,21 +15,52 @@ export const onDashboardUpdate = onDocumentWritten(
 
     if (!newData) return null; // Document deleted
 
+    const newGreetings = newData.greetings || {};
+    const oldGreetings = prevData?.greetings || {};
+    const newPaps = newData.paps || {};
+    const oldPaps = prevData?.paps || {};
+
     let title = "";
     let body = "";
     let senderId = "";
 
-    // Check if greeting changed
-    if (newData.greeting !== prevData?.greeting && newData.greetingBy) {
-      title = "New Greeting! 💕";
-      body = `Your partner left a greeting: "${newData.greeting}"`;
-      senderId = newData.greetingBy;
+    const historyWrites: any[] = [];
+
+    for (const uid of Object.keys(newGreetings)) {
+      if (!oldGreetings[uid] || newGreetings[uid].updatedAt !== oldGreetings[uid].updatedAt) {
+        title = "New Greeting! 💕";
+        body = `Your partner left a greeting: "${newGreetings[uid].text}"`;
+        senderId = uid;
+        historyWrites.push({
+          type: "greeting",
+          uid,
+          text: newGreetings[uid].text,
+          updatedAt: newGreetings[uid].updatedAt
+        });
+      }
     }
-    // Check if daily PAP changed
-    else if (newData.papUrl !== prevData?.papUrl && newData.papBy) {
-      title = "New Daily Pipipip! 📸";
-      body = "Your partner uploaded a new photo. Open the app to see it!";
-      senderId = newData.papBy;
+
+    for (const uid of Object.keys(newPaps)) {
+      if (!oldPaps[uid] || newPaps[uid].updatedAt !== oldPaps[uid].updatedAt) {
+        title = "New Daily Pipipip! 📸";
+        body = "Your partner uploaded a new photo. Open the app to see it!";
+        senderId = uid;
+        historyWrites.push({
+          type: "pap",
+          uid,
+          url: newPaps[uid].url,
+          updatedAt: newPaps[uid].updatedAt
+        });
+      }
+    }
+
+    if (historyWrites.length > 0) {
+      const batch = admin.firestore().batch();
+      historyWrites.forEach(hw => {
+        const docRef = admin.firestore().collection("couples").doc(coupleId).collection("history").doc();
+        batch.set(docRef, hw);
+      });
+      await batch.commit();
     }
 
     if (!title || !senderId) return null; // No relevant change

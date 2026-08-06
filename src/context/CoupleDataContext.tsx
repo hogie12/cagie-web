@@ -30,11 +30,8 @@ export interface StickyNote {
 }
 
 export interface DashboardData {
-  greeting?: string;
-  greetingBy?: string;
-  papUrl?: string;
-  papBy?: string;
-  papTimestamp?: unknown;
+  greetings?: Record<string, { text: string; updatedAt: number }>;
+  paps?: Record<string, { url: string; updatedAt: number }>;
 }
 
 interface CoupleDataContextType {

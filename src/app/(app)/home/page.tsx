@@ -55,6 +55,7 @@ export default function HomePage() {
 
   const [greetingInput, setGreetingInput] = useState("");
   const [isUploadingPap, setIsUploadingPap] = useState(false);
+  const [activePapUid, setActivePapUid] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (isLoading) {
@@ -72,8 +73,12 @@ export default function HomePage() {
     await setDoc(
       doc(db, "couples", coupleId, "dashboard", "main"),
       {
-        greeting: greetingInput.trim(),
-        greetingBy: user.uid,
+        greetings: {
+          [user.uid]: {
+            text: greetingInput.trim(),
+            updatedAt: Date.now()
+          }
+        }
       },
       { merge: true },
     );
@@ -93,9 +98,12 @@ export default function HomePage() {
       await setDoc(
         doc(db, "couples", coupleId, "dashboard", "main"),
         {
-          papUrl: url,
-          papBy: user.uid,
-          papTimestamp: Date.now(),
+          paps: {
+            [user.uid]: {
+              url: url,
+              updatedAt: Date.now(),
+            }
+          }
         },
         { merge: true },
       );
@@ -106,12 +114,33 @@ export default function HomePage() {
     }
   };
 
-  const partnerGreeting =
-    dashboard?.greetingBy !== user?.uid ? dashboard?.greeting : null;
-  const isPapFromPartner = dashboard?.papBy && dashboard?.papBy !== user?.uid;
+  const today = startOfDay(new Date());
+  const todayMs = today.getTime();
+
+  // Greetings logic
+  const userGreeting = dashboard?.greetings?.[user?.uid || ""];
+  const partnerGreetingEntry = Object.entries(dashboard?.greetings || {}).find(
+    ([uid, g]: [string, any]) => uid !== user?.uid && g.updatedAt >= todayMs
+  );
+  const partnerGreeting = partnerGreetingEntry ? partnerGreetingEntry[1].text : null;
+  const isUserGreetingToday = (userGreeting?.updatedAt || 0) >= todayMs;
+  const userGreetingText = isUserGreetingToday ? userGreeting?.text : "";
+
+  // PAP logic
+  const userPap = dashboard?.paps?.[user?.uid || ""];
+  const partnerPapEntry = Object.entries(dashboard?.paps || {}).find(
+    ([uid, p]: [string, any]) => uid !== user?.uid && p.updatedAt >= todayMs
+  );
+  const partnerUid = partnerPapEntry?.[0] || "partner";
+  const partnerPapUrl = partnerPapEntry ? partnerPapEntry[1].url : null;
+  
+  const isUserPapToday = (userPap?.updatedAt || 0) >= todayMs;
+  const userPapUrl = isUserPapToday ? userPap?.url : null;
+  
+  const displayActiveUid = activePapUid || (partnerPapUrl ? partnerUid : (userPapUrl ? user?.uid : null));
 
   // Filter future events
-  const today = startOfDay(new Date());
+  // Filter future events
   const upcomingEvents = events
     .filter((e) => {
       const eventDate = parseISO(e.dateStr);
@@ -144,7 +173,7 @@ export default function HomePage() {
             Good morning, {user?.displayName?.split(" ")[0]}! ✨
           </h1>
 
-          {partnerGreeting ? (
+          {partnerGreeting && (
             <div className="p-6 bg-pink-100/50 rounded-3xl border border-pink-200 shadow-sm relative overflow-hidden">
               <Heart className="absolute -right-4 -bottom-4 w-24 h-24 text-pink-200/50 rotate-12" />
               <p className="text-xl font-medium text-pink-900 relative z-10">
@@ -154,34 +183,34 @@ export default function HomePage() {
                 — From your partner 💖
               </p>
             </div>
-          ) : (
-            <div className="p-5 bg-white rounded-3xl border border-slate-100 shadow-sm">
-              <p className="text-sm text-slate-500 mb-3">
-                Leave a cute greeting for your partner to wake up to!
-              </p>
-              <form onSubmit={handleUpdateGreeting} className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="E.g., Have a great day at work! I love you! 🥰"
-                  value={greetingInput}
-                  onChange={(e) => setGreetingInput(e.target.value)}
-                  className="flex-1 bg-slate-50 border-none rounded-2xl px-4 py-2.5 focus:ring-2 focus:ring-primary/20 outline-none text-sm"
-                />
-                <button
-                  type="submit"
-                  disabled={!greetingInput.trim()}
-                  className="bg-primary text-white p-2.5 rounded-2xl hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center aspect-square"
-                >
-                  <Send size={18} />
-                </button>
-              </form>
-              {dashboard?.greetingBy === user?.uid && (
-                <p className="text-xs text-green-600 mt-3 font-medium">
-                  ✓ You left a greeting. Waiting for them to see it!
-                </p>
-              )}
-            </div>
           )}
+
+          <div className="p-5 bg-white rounded-3xl border border-slate-100 shadow-sm">
+            <p className="text-sm text-slate-500 mb-3">
+              {isUserGreetingToday ? "Update your greeting:" : "Leave a cute greeting for your partner to wake up to!"}
+            </p>
+            <form onSubmit={handleUpdateGreeting} className="flex gap-2">
+              <input
+                type="text"
+                placeholder={isUserGreetingToday ? userGreetingText : "E.g., Have a great day at work! I love you! 🥰"}
+                value={greetingInput}
+                onChange={(e) => setGreetingInput(e.target.value)}
+                className="flex-1 bg-slate-50 border-none rounded-2xl px-4 py-2.5 focus:ring-2 focus:ring-primary/20 outline-none text-sm"
+              />
+              <button
+                type="submit"
+                disabled={!greetingInput.trim()}
+                className="bg-primary text-white p-2.5 rounded-2xl hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center aspect-square"
+              >
+                <Send size={18} />
+              </button>
+            </form>
+            {isUserGreetingToday && (
+              <p className="text-xs text-green-600 mt-3 font-medium">
+                ✓ You left a greeting today! Waiting for them to see it.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Daily PAP */}
@@ -192,25 +221,57 @@ export default function HomePage() {
           </div>
 
           <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-4">
-            {dashboard?.papUrl ? (
-              <div className="relative aspect-square md:aspect-video rounded-3xl overflow-hidden group">
+            {partnerPapUrl && userPapUrl ? (
+              <div className="relative aspect-square md:aspect-video rounded-3xl overflow-hidden group bg-black">
+                {/* Main PAP */}
                 <img
-                  src={dashboard?.papUrl}
+                  src={displayActiveUid === partnerUid ? partnerPapUrl : userPapUrl}
                   alt="Daily PAP"
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-6">
                   <p className="text-white font-medium">
-                    {isPapFromPartner
-                      ? "Uploaded by your partner 📸"
-                      : "Uploaded by you 📸"}
+                    {displayActiveUid === partnerUid ? "Uploaded by your partner 📸" : "Uploaded by you 📸"}
                   </p>
                 </div>
 
-                {/* Allow replacing the PAP */}
+                {/* Thumbnail PAP */}
+                <div 
+                  className="absolute top-4 left-4 w-24 h-32 md:w-32 md:h-40 rounded-2xl overflow-hidden border-2 border-white shadow-xl cursor-pointer hover:scale-105 transition-transform z-10 bg-slate-100"
+                  onClick={() => setActivePapUid(displayActiveUid === partnerUid ? (user?.uid || "") : partnerUid)}
+                >
+                  <img 
+                    src={displayActiveUid === partnerUid ? userPapUrl : partnerPapUrl}
+                    alt="Thumbnail PAP"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+
+                {/* Replace button globally */}
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="absolute top-4 right-4 bg-white/90 backdrop-blur text-slate-800 p-2.5 rounded-full hover:bg-white transition-all shadow-sm"
+                  className="absolute top-4 right-4 bg-white/90 backdrop-blur text-slate-800 p-2.5 rounded-full hover:bg-white transition-all shadow-sm z-20"
+                  title="Upload new PAP"
+                >
+                  <Camera size={18} />
+                </button>
+              </div>
+            ) : (partnerPapUrl || userPapUrl) ? (
+              <div className="relative aspect-square md:aspect-video rounded-3xl overflow-hidden group bg-black">
+                <img
+                  src={(partnerPapUrl || userPapUrl) as string}
+                  alt="Daily PAP"
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-6">
+                  <p className="text-white font-medium">
+                    {partnerPapUrl ? "Uploaded by your partner 📸" : "Uploaded by you 📸"}
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute top-4 right-4 bg-white/90 backdrop-blur text-slate-800 p-2.5 rounded-full hover:bg-white transition-all shadow-sm z-20"
                   title="Upload new PAP"
                 >
                   <Camera size={18} />
