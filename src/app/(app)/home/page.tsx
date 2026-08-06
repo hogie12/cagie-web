@@ -128,7 +128,11 @@ export default function HomePage() {
 
   // Recent notes
   const recentNotes = [...notes]
-    .sort((a, b) => ((b.createdAt as any)?.toMillis?.() || 0) - ((a.createdAt as any)?.toMillis?.() || 0))
+    .sort(
+      (a, b) =>
+        ((b.createdAt as any)?.toMillis?.() || 0) -
+        ((a.createdAt as any)?.toMillis?.() || 0),
+    )
     .slice(0, 2);
 
   return (
@@ -184,7 +188,7 @@ export default function HomePage() {
         <section>
           <div className="flex items-center gap-2 mb-4">
             <Camera className="text-primary" size={20} />
-            <h2 className="text-xl font-semibold">Daily PAP</h2>
+            <h2 className="text-xl font-semibold">Daily Pipipip</h2>
           </div>
 
           <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-4">
@@ -220,7 +224,9 @@ export default function HomePage() {
                 <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-sm mb-3 group-hover:scale-110 transition-transform">
                   <Upload className="text-primary" size={24} />
                 </div>
-                <p className="font-medium text-slate-700">Send a Daily PAP!</p>
+                <p className="font-medium text-slate-700">
+                  Send a Daily Pipipip!
+                </p>
                 <p className="text-sm text-slate-400 mt-1">
                   Tap to snap or upload a photo
                 </p>
