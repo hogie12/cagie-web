@@ -8,7 +8,7 @@ export const onDashboardUpdate = onDocumentWritten(
   async (event) => {
     const change = event.data;
     if (!change) return;
-    
+
     const { coupleId } = event.params;
     const newData = change.after.data();
     const prevData = change.before.data();
@@ -27,7 +27,7 @@ export const onDashboardUpdate = onDocumentWritten(
     }
     // Check if daily PAP changed
     else if (newData.papUrl !== prevData?.papUrl && newData.papBy) {
-      title = "New Daily PAP! 📸";
+      title = "New Daily Pipipip! 📸";
       body = "Your partner uploaded a new photo. Open the app to see it!";
       senderId = newData.papBy;
     }
@@ -37,11 +37,13 @@ export const onDashboardUpdate = onDocumentWritten(
     // Find the partner's user document to get their FCM tokens
     // We assume the coupleId document has an array of `users` or we find the other user
     // Since we don't have the exact schema of `couples/{coupleId}`, we'll query for users whose coupleId matches, excluding the sender.
-    const usersSnapshot = await admin.firestore().collection("users")
+    const usersSnapshot = await admin
+      .firestore()
+      .collection("users")
       .where("coupleId", "==", coupleId)
       .get();
 
-    const partnerDocs = usersSnapshot.docs.filter(doc => doc.id !== senderId);
+    const partnerDocs = usersSnapshot.docs.filter((doc) => doc.id !== senderId);
     if (partnerDocs.length === 0) {
       console.log("No partner found for coupleId:", coupleId);
       return null;
@@ -60,7 +62,7 @@ export const onDashboardUpdate = onDocumentWritten(
         title,
         body,
         icon: "/apple-icon.png", // Ensure this exists in public/
-        clickAction: "https://cagie-planner.web.app/home" // Example URL, might need adjustment based on exact domain
+        clickAction: "https://cagie-planner.web.app/home", // Example URL, might need adjustment based on exact domain
       },
     };
 
@@ -72,7 +74,11 @@ export const onDashboardUpdate = onDocumentWritten(
       response.results.forEach((result, index) => {
         const error = result.error;
         if (error) {
-          console.error("Failure sending notification to", fcmTokens[index], error);
+          console.error(
+            "Failure sending notification to",
+            fcmTokens[index],
+            error,
+          );
           if (
             error.code === "messaging/invalid-registration-token" ||
             error.code === "messaging/registration-token-not-registered"
@@ -83,12 +89,12 @@ export const onDashboardUpdate = onDocumentWritten(
       });
       if (tokensToRemove.length > 0) {
         await partnerDocs[0].ref.update({
-          fcmTokens: admin.firestore.FieldValue.arrayRemove(...tokensToRemove)
+          fcmTokens: admin.firestore.FieldValue.arrayRemove(...tokensToRemove),
         });
       }
     } catch (error) {
       console.error("Error sending message:", error);
     }
     return;
-  }
+  },
 );
