@@ -2,8 +2,9 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { User, onAuthStateChanged } from "firebase/auth";
-import { auth, db } from "@/lib/firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { auth, db, initializeMessaging } from "@/lib/firebase";
+import { doc, getDoc, setDoc, updateDoc, arrayUnion } from "firebase/firestore";
+import { getToken } from "firebase/messaging";
 
 interface AuthContextType {
   user: User | null;
@@ -15,6 +16,7 @@ interface AuthContextType {
   userPhotoURL: string | null;
   partnerPhotoURL: string | null;
   partnerId: string | null;
+  requestNotificationPermission: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -27,6 +29,7 @@ const AuthContext = createContext<AuthContextType>({
   userPhotoURL: null,
   partnerPhotoURL: null,
   partnerId: null,
+  requestNotificationPermission: async () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -40,6 +43,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [userPhotoURL, setUserPhotoURL] = useState<string | null>(null);
   const [partnerPhotoURL, setPartnerPhotoURL] = useState<string | null>(null);
   const [partnerId, setPartnerId] = useState<string | null>(null);
+
+  const requestNotificationPermission = async () => {
+    if (!user) return;
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === "granted") {
+        const messaging = await initializeMessaging();
+        if (messaging) {
+          const token = await getToken(messaging, {
+            // vapidKey: "YOUR_PUBLIC_VAPID_KEY_HERE" // Only needed if custom push service, Firebase default works for many cases
+          });
+          if (token) {
+            const userDocRef = doc(db, "users", user.uid);
+            await updateDoc(userDocRef, {
+              fcmTokens: arrayUnion(token)
+            });
+            console.log("FCM Token saved successfully");
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error requesting notification permission:", error);
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -111,7 +138,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, coupleId, setCoupleId, userName, partnerName, userPhotoURL, partnerPhotoURL, partnerId }}>
+    <AuthContext.Provider value={{ user, loading, coupleId, setCoupleId, userName, partnerName, userPhotoURL, partnerPhotoURL, partnerId, requestNotificationPermission }}>
       {children}
     </AuthContext.Provider>
   );
