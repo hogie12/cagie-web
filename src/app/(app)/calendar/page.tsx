@@ -30,11 +30,13 @@ import {
 } from "@/context/CoupleDataContext";
 import { doc, setDoc, collection, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import MonthlyGrid from "./components/MonthlyGrid";
 
 export default function CalendarPage() {
   const { coupleId, userName, partnerName, user, partnerId } = useAuth();
   const { events } = useCoupleData();
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [viewMode, setViewMode] = useState<"daily" | "monthly">("daily");
 
   // Filters
   const [showMe, setShowMe] = useState(true);
@@ -274,6 +276,20 @@ export default function CalendarPage() {
           </h1>
         </div>
         <div className="flex items-center gap-2 sm:gap-4">
+          <div className="flex bg-gray-100 p-0.5 sm:p-1 rounded-lg">
+            <button
+              onClick={() => setViewMode("daily")}
+              className={`px-2 py-1 sm:px-3 sm:py-1 rounded-md text-xs sm:text-sm font-medium transition-colors ${viewMode === "daily" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+            >
+              Daily
+            </button>
+            <button
+              onClick={() => setViewMode("monthly")}
+              className={`px-2 py-1 sm:px-3 sm:py-1 rounded-md text-xs sm:text-sm font-medium transition-colors ${viewMode === "monthly" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+            >
+              Monthly
+            </button>
+          </div>
           <button
             onClick={() => setSelectedDate(new Date())}
             className="px-3 py-1.5 bg-primary/10 text-primary font-medium rounded-full text-sm hover:bg-primary/20 transition-colors"
@@ -319,7 +335,9 @@ export default function CalendarPage() {
       </div>
 
       {/* 3. Week Strip */}
-      <div className="flex items-center border-b border-gray-100 bg-white px-2">
+      {viewMode === "daily" && (
+        <>
+          <div className="flex items-center border-b border-gray-100 bg-white px-2">
         <button
           onClick={prevWeek}
           className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500"
@@ -463,6 +481,21 @@ export default function CalendarPage() {
           </AnimatePresence>
         </div>
       </div>
+      </>
+      )}
+
+      {viewMode === "monthly" && (
+        <MonthlyGrid
+          selectedDate={selectedDate}
+          setSelectedDate={setSelectedDate}
+          events={events}
+          colors={colors}
+          setViewMode={setViewMode}
+          showMe={showMe}
+          showPartner={showPartner}
+          showUs={showUs}
+        />
+      )}
 
       {/* Add Event Modal */}
       <AnimatePresence>
