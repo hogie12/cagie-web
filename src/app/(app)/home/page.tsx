@@ -92,7 +92,7 @@ export default function HomePage() {
 
   // Recent notes
   const recentNotes = [...notes]
-    .sort((a, b) => b.createdAt?.toMillis?.() - a.createdAt?.toMillis?.() || 0)
+    .sort((a, b) => (b.createdAt as any)?.toMillis?.() - (a.createdAt as any)?.toMillis?.() || 0)
     .slice(0, 2);
 
   return (
