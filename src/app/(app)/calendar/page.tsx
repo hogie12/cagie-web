@@ -9,6 +9,7 @@ import {
   isSameDay,
   isToday,
   parse,
+  addMonths,
 } from "date-fns";
 import {
   Calendar as CalendarIcon,
@@ -20,6 +21,7 @@ import {
   X,
   Edit2,
   Trash2,
+  Repeat,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
@@ -27,10 +29,46 @@ import {
   useCoupleData,
   EventOwner,
   CalendarEvent,
+  EventException,
 } from "@/context/CoupleDataContext";
 import { doc, setDoc, collection, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import MonthlyGrid from "./components/MonthlyGrid";
+
+type RepeatType = "none" | "daily" | "weekly";
+
+const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+
+/** Convert HH:mm to total minutes */
+function timeToMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
+
+/** Compute duration in minutes between two HH:mm strings */
+function durationBetween(start: string, end: string): number {
+  return timeToMinutes(end) - timeToMinutes(start);
+}
+
+/** Format a repeat rule for display */
+function formatRepeatLabel(
+  repeatType?: RepeatType,
+  repeatDays?: number[],
+  repeatUntil?: string,
+): string | null {
+  if (!repeatType || repeatType === "none") return null;
+  let label = "Repeats ";
+  if (repeatType === "daily") {
+    label += "daily";
+  } else if (repeatType === "weekly" && repeatDays?.length) {
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    label += repeatDays.map((d) => dayNames[d]).join(", ");
+  }
+  if (repeatUntil) {
+    label += ` until ${format(parse(repeatUntil, "yyyy-MM-dd", new Date()), "MMM d, yyyy")}`;
+  }
+  return label;
+}
 
 export default function CalendarPage() {
   const { coupleId, userName, partnerName, user, partnerId } = useAuth();
@@ -43,13 +81,16 @@ export default function CalendarPage() {
   const [showPartner, setShowPartner] = useState(true);
   const [showUs, setShowUs] = useState(true);
 
-  // Modal State
+  // Add Event Modal State
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [newEventTitle, setNewEventTitle] = useState("");
   const [newEventDescription, setNewEventDescription] = useState("");
   const [newEventOwner, setNewEventOwner] = useState<EventOwner>("me");
   const [newStartTime, setNewStartTime] = useState("12:00");
-  const [newDuration, setNewDuration] = useState("60");
+  const [newEndTime, setNewEndTime] = useState("13:00");
+  const [newRepeatType, setNewRepeatType] = useState<RepeatType>("none");
+  const [newRepeatDays, setNewRepeatDays] = useState<number[]>([]);
+  const [newRepeatUntil, setNewRepeatUntil] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modalError, setModalError] = useState("");
 
@@ -57,12 +98,13 @@ export default function CalendarPage() {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showRecurringPrompt, setShowRecurringPrompt] = useState<"edit" | "delete" | null>(null);
   
   const [editEventTitle, setEditEventTitle] = useState("");
   const [editEventDescription, setEditEventDescription] = useState("");
   const [editEventOwner, setEditEventOwner] = useState<EventOwner>("me");
   const [editStartTime, setEditStartTime] = useState("12:00");
-  const [editDuration, setEditDuration] = useState("60");
+  const [editEndTime, setEditEndTime] = useState("13:00");
 
   const timelineRef = useRef<HTMLDivElement>(null);
 
@@ -72,6 +114,13 @@ export default function CalendarPage() {
       timelineRef.current.scrollTop = 6 * 60; // 6 AM
     }
   }, []);
+
+  // Set default repeatUntil when repeat is enabled
+  useEffect(() => {
+    if (newRepeatType !== "none" && !newRepeatUntil) {
+      setNewRepeatUntil(format(addMonths(selectedDate, 1), "yyyy-MM-dd"));
+    }
+  }, [newRepeatType, newRepeatUntil, selectedDate]);
 
   const nextWeek = () => setSelectedDate(addDays(selectedDate, 7));
   const prevWeek = () => setSelectedDate(subDays(selectedDate, 7));
@@ -101,16 +150,32 @@ export default function CalendarPage() {
 
   const HOUR_HEIGHT = 60; // 60px per hour
 
+  const resetAddModal = () => {
+    setIsAddOpen(false);
+    setNewEventTitle("");
+    setNewEventDescription("");
+    setNewStartTime("12:00");
+    setNewEndTime("13:00");
+    setNewRepeatType("none");
+    setNewRepeatDays([]);
+    setNewRepeatUntil("");
+    setModalError("");
+  };
+
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!coupleId || !newEventTitle) return;
     setModalError("");
 
-    // Check for overlap
-    const [newHours, newMins] = newStartTime.split(":").map(Number);
-    const newStartMins = newHours * 60 + newMins;
-    const newEndMins = newStartMins + parseInt(newDuration, 10);
+    // Validate end time > start time
+    const newStartMins = timeToMinutes(newStartTime);
+    const newEndMins = timeToMinutes(newEndTime);
+    if (newEndMins <= newStartMins) {
+      setModalError("End time must be after start time.");
+      return;
+    }
 
+    // Check for overlap
     const hasOverlap = todayEvents.some((event) => {
       // Check column conflict
       if (
@@ -121,9 +186,8 @@ export default function CalendarPage() {
         return false; // no conflict if different columns
       }
 
-      const [eHours, eMins] = event.startTime.split(":").map(Number);
-      const eStartMins = eHours * 60 + eMins;
-      const eEndMins = eStartMins + event.durationMinutes;
+      const eStartMins = timeToMinutes(event.startTime);
+      const eEndMins = timeToMinutes(event.endTime);
 
       return (
         Math.max(newStartMins, eStartMins) < Math.min(newEndMins, eEndMins)
@@ -137,11 +201,18 @@ export default function CalendarPage() {
       return;
     }
 
+    // Validate repeat settings
+    if (newRepeatType === "weekly" && newRepeatDays.length === 0) {
+      setModalError("Please select at least one day for weekly repeat.");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const eventsRef = collection(db, "couples", coupleId, "events");
       const newEventDoc = doc(eventsRef);
-      await setDoc(newEventDoc, {
+
+      const eventData: Record<string, unknown> = {
         title: newEventTitle,
         description: newEventDescription,
         owner: newEventOwner,
@@ -153,14 +224,20 @@ export default function CalendarPage() {
               : partnerId,
         dateStr: selectedDateStr,
         startTime: newStartTime,
-        durationMinutes: parseInt(newDuration, 10),
-      });
+        endTime: newEndTime,
+      };
 
-      setIsAddOpen(false);
-      setNewEventTitle("");
-      setNewEventDescription("");
-      setNewStartTime("12:00");
-      setNewDuration("60");
+      // Add repeat fields if applicable
+      if (newRepeatType !== "none") {
+        eventData.repeatType = newRepeatType;
+        if (newRepeatType === "weekly") {
+          eventData.repeatDays = newRepeatDays;
+        }
+        eventData.repeatUntil = newRepeatUntil;
+      }
+
+      await setDoc(newEventDoc, eventData);
+      resetAddModal();
     } catch (err) {
       console.error(err);
     } finally {
@@ -174,17 +251,76 @@ export default function CalendarPage() {
     setEditEventDescription(event.description || "");
     setEditEventOwner(event.owner);
     setEditStartTime(event.startTime);
-    setEditDuration(event.durationMinutes.toString());
+    setEditEndTime(event.endTime);
     setIsEditing(false);
     setShowDeleteConfirm(false);
+    setShowRecurringPrompt(null);
     setModalError("");
+  };
+
+  /** Check if the selected event is a recurring occurrence */
+  const isRecurring = selectedEvent?.isOccurrence || 
+    (selectedEvent?.repeatType && selectedEvent.repeatType !== "none");
+
+  const handleEditClick = () => {
+    if (isRecurring) {
+      setShowRecurringPrompt("edit");
+    } else {
+      setIsEditing(true);
+    }
+  };
+
+  const handleDeleteClick = () => {
+    if (isRecurring) {
+      setShowRecurringPrompt("delete");
+    } else {
+      setShowDeleteConfirm(true);
+    }
+  };
+
+  const handleRecurringAction = async (scope: "this" | "all") => {
+    if (!selectedEvent || !coupleId) return;
+    const action = showRecurringPrompt;
+    setShowRecurringPrompt(null);
+
+    const originalId = selectedEvent.originalEventId || selectedEvent.id;
+
+    if (action === "delete") {
+      setIsSubmitting(true);
+      try {
+        if (scope === "all") {
+          // Delete the entire template
+          await deleteDoc(doc(db, "couples", coupleId, "events", originalId));
+        } else {
+          // Add deleted exception for this date
+          const eventRef = doc(db, "couples", coupleId, "events", originalId);
+          await updateDoc(eventRef, {
+            [`exceptions.${selectedEvent.dateStr}`]: { deleted: true } as EventException,
+          });
+        }
+        setSelectedEvent(null);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsSubmitting(false);
+      }
+    } else if (action === "edit") {
+      if (scope === "all") {
+        // Edit the template directly
+        setIsEditing(true);
+      } else {
+        // Edit will create an exception — still open edit form, but handle save differently
+        setIsEditing(true);
+      }
+    }
   };
 
   const handleDeleteEvent = async () => {
     if (!selectedEvent || !coupleId) return;
     setIsSubmitting(true);
     try {
-      await deleteDoc(doc(db, "couples", coupleId, "events", selectedEvent.id));
+      const eventId = selectedEvent.originalEventId || selectedEvent.id;
+      await deleteDoc(doc(db, "couples", coupleId, "events", eventId));
       setSelectedEvent(null);
     } catch (err) {
       console.error(err);
@@ -198,11 +334,15 @@ export default function CalendarPage() {
     if (!coupleId || !selectedEvent || !editEventTitle) return;
     setModalError("");
 
-    // Check for overlap excluding current event
-    const [newHours, newMins] = editStartTime.split(":").map(Number);
-    const newStartMins = newHours * 60 + newMins;
-    const newEndMins = newStartMins + parseInt(editDuration, 10);
+    // Validate end time > start time
+    const newStartMins = timeToMinutes(editStartTime);
+    const newEndMins = timeToMinutes(editEndTime);
+    if (newEndMins <= newStartMins) {
+      setModalError("End time must be after start time.");
+      return;
+    }
 
+    // Check for overlap excluding current event
     const hasOverlap = todayEvents.some((event) => {
       if (event.id === selectedEvent.id) return false;
       
@@ -214,9 +354,8 @@ export default function CalendarPage() {
         return false;
       }
 
-      const [eHours, eMins] = event.startTime.split(":").map(Number);
-      const eStartMins = eHours * 60 + eMins;
-      const eEndMins = eStartMins + event.durationMinutes;
+      const eStartMins = timeToMinutes(event.startTime);
+      const eEndMins = timeToMinutes(event.endTime);
 
       return (
         Math.max(newStartMins, eStartMins) < Math.min(newEndMins, eEndMins)
@@ -232,20 +371,44 @@ export default function CalendarPage() {
 
     setIsSubmitting(true);
     try {
-      const eventRef = doc(db, "couples", coupleId, "events", selectedEvent.id);
-      await updateDoc(eventRef, {
-        title: editEventTitle,
-        description: editEventDescription,
-        owner: editEventOwner,
-        ownerId:
-          editEventOwner === "us"
-            ? "us"
-            : editEventOwner === "me"
-              ? user?.uid
-              : partnerId,
-        startTime: editStartTime,
-        durationMinutes: parseInt(editDuration, 10),
-      });
+      const originalId = selectedEvent.originalEventId || selectedEvent.id;
+      const eventRef = doc(db, "couples", coupleId, "events", originalId);
+
+      // If this is a recurring occurrence being edited as "this event only"
+      if (selectedEvent.isOccurrence && showRecurringPrompt !== "edit") {
+        // Write an exception for this date
+        const exception: EventException = {
+          title: editEventTitle,
+          description: editEventDescription,
+          startTime: editStartTime,
+          endTime: editEndTime,
+          owner: editEventOwner,
+          ownerId:
+            editEventOwner === "us"
+              ? "us"
+              : editEventOwner === "me"
+                ? user?.uid
+                : partnerId || undefined,
+        };
+        await updateDoc(eventRef, {
+          [`exceptions.${selectedEvent.dateStr}`]: exception,
+        });
+      } else {
+        // Update the template/event directly
+        await updateDoc(eventRef, {
+          title: editEventTitle,
+          description: editEventDescription,
+          owner: editEventOwner,
+          ownerId:
+            editEventOwner === "us"
+              ? "us"
+              : editEventOwner === "me"
+                ? user?.uid
+                : partnerId,
+          startTime: editStartTime,
+          endTime: editEndTime,
+        });
+      }
 
       setIsEditing(false);
       setSelectedEvent({
@@ -254,13 +417,19 @@ export default function CalendarPage() {
         description: editEventDescription,
         owner: editEventOwner,
         startTime: editStartTime,
-        durationMinutes: parseInt(editDuration, 10)
+        endTime: editEndTime,
       });
     } catch (err) {
       console.error(err);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const toggleRepeatDay = (day: number) => {
+    setNewRepeatDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort(),
+    );
   };
 
   return (
@@ -429,9 +598,10 @@ export default function CalendarPage() {
               if (event.owner === "partner" && !showPartner) return null;
               if (event.owner === "us" && !showUs) return null;
 
-              const [hours, minutes] = event.startTime.split(":").map(Number);
-              const top = hours * HOUR_HEIGHT + minutes * (HOUR_HEIGHT / 60);
-              const height = event.durationMinutes * (HOUR_HEIGHT / 60);
+              const startMins = timeToMinutes(event.startTime);
+              const endMins = timeToMinutes(event.endTime);
+              const top = startMins * (HOUR_HEIGHT / 60);
+              const height = (endMins - startMins) * (HOUR_HEIGHT / 60);
 
               let left = "left-[50px]";
               let width = "w-[calc(100%-50px)]";
@@ -450,10 +620,14 @@ export default function CalendarPage() {
               const colorClass = colors[event.owner].bg;
               const textClass = colors[event.owner].text;
 
+              const durationMins = endMins - startMins;
               const durationStr =
-                event.durationMinutes >= 60
-                  ? `${event.durationMinutes / 60}h`
-                  : `${event.durationMinutes}m`;
+                durationMins >= 60
+                  ? `${Math.round(durationMins / 60 * 10) / 10}h`
+                  : `${durationMins}m`;
+
+              const isRecurringEvent = event.isOccurrence || 
+                (event.repeatType && event.repeatType !== "none");
 
               return (
                 <motion.div
@@ -465,8 +639,9 @@ export default function CalendarPage() {
                   className={`absolute ${left} ${width} ${colorClass} ${textClass} rounded-sm p-1.5 overflow-hidden shadow-sm cursor-pointer hover:opacity-90 transition-opacity`}
                   style={{ top: `${top}px`, height: `${height}px`, zIndex }}
                 >
-                  <div className="text-[13px] font-semibold leading-tight truncate">
-                    {event.title}
+                  <div className="text-[13px] font-semibold leading-tight truncate flex items-center gap-1">
+                    {isRecurringEvent && <Repeat size={10} className="flex-shrink-0 opacity-80" />}
+                    <span className="truncate">{event.title}</span>
                   </div>
                   <div className="text-[10px] opacity-90 truncate mt-0.5">
                     {format(
@@ -505,15 +680,12 @@ export default function CalendarPage() {
               initial={{ opacity: 0, y: 50, scale: 0.9 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 20, scale: 0.95 }}
-              className="bg-card w-full max-w-md rounded-3xl p-6 shadow-2xl border border-border"
+              className="bg-card w-full max-w-md rounded-3xl p-6 shadow-2xl border border-border max-h-[90vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-bold">Add Event</h3>
                 <button
-                  onClick={() => {
-                    setIsAddOpen(false);
-                    setModalError("");
-                  }}
+                  onClick={resetAddModal}
                   className="p-2 bg-muted rounded-full hover:bg-gray-200 transition-colors"
                 >
                   <X size={20} />
@@ -579,10 +751,11 @@ export default function CalendarPage() {
                   </div>
                 </div>
 
+                {/* Time Range */}
                 <div className="flex gap-4">
                   <div className="flex-1">
                     <label className="text-sm font-medium text-muted-foreground">
-                      Time
+                      Start
                     </label>
                     <input
                       type="time"
@@ -594,24 +767,88 @@ export default function CalendarPage() {
                   </div>
                   <div className="flex-1">
                     <label className="text-sm font-medium text-muted-foreground">
-                      Duration
+                      End
                     </label>
-                    <select
-                      value={newDuration}
-                      onChange={(e) => setNewDuration(e.target.value)}
+                    <input
+                      type="time"
+                      value={newEndTime}
+                      onChange={(e) => setNewEndTime(e.target.value)}
                       className="w-full mt-1 px-4 py-3 rounded-xl border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary transition-all"
-                    >
-                      <option value="15">15 min</option>
-                      <option value="30">30 min</option>
-                      <option value="45">45 min</option>
-                      <option value="60">1 hour</option>
-                      <option value="90">1.5 hours</option>
-                      <option value="120">2 hours</option>
-                      <option value="180">3 hours</option>
-                      <option value="240">4 hours</option>
-                    </select>
+                      required
+                    />
                   </div>
                 </div>
+
+                {/* Repeat Section */}
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">
+                    Repeat
+                  </label>
+                  <div className="flex gap-2 mt-1">
+                    {(["none", "daily", "weekly"] as RepeatType[]).map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => {
+                          setNewRepeatType(type);
+                          if (type === "none") {
+                            setNewRepeatDays([]);
+                            setNewRepeatUntil("");
+                          }
+                        }}
+                        className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors capitalize ${
+                          newRepeatType === type
+                            ? "bg-gray-900 text-white"
+                            : "bg-muted text-muted-foreground hover:bg-gray-200"
+                        }`}
+                      >
+                        {type === "none" ? "None" : type === "daily" ? "Daily" : "Weekly"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Weekly Day Picker */}
+                {newRepeatType === "weekly" && (
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">
+                      Repeat on
+                    </label>
+                    <div className="flex gap-1.5 mt-1">
+                      {DAY_LABELS.map((label, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => toggleRepeatDay(idx)}
+                          className={`w-10 h-10 rounded-full text-sm font-medium transition-all ${
+                            newRepeatDays.includes(idx)
+                              ? "bg-gray-900 text-white scale-105"
+                              : "bg-muted text-muted-foreground hover:bg-gray-200"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Until Date */}
+                {newRepeatType !== "none" && (
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">
+                      Until
+                    </label>
+                    <input
+                      type="date"
+                      value={newRepeatUntil}
+                      onChange={(e) => setNewRepeatUntil(e.target.value)}
+                      min={selectedDateStr}
+                      className="w-full mt-1 px-4 py-3 rounded-xl border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                      required
+                    />
+                  </div>
+                )}
 
                 <button
                   type="submit"
@@ -641,16 +878,16 @@ export default function CalendarPage() {
                   {isEditing ? "Edit Event" : "Event Details"}
                 </h3>
                 <div className="flex items-center gap-2">
-                  {!isEditing && (
+                  {!isEditing && !showRecurringPrompt && (
                     <>
                       <button
-                        onClick={() => setIsEditing(true)}
+                        onClick={handleEditClick}
                         className="p-2 text-gray-500 hover:text-primary hover:bg-primary/10 rounded-full transition-colors"
                       >
                         <Edit2 size={18} />
                       </button>
                       <button
-                        onClick={() => setShowDeleteConfirm(true)}
+                        onClick={handleDeleteClick}
                         className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
                       >
                         <Trash2 size={18} />
@@ -662,6 +899,7 @@ export default function CalendarPage() {
                       setSelectedEvent(null);
                       setIsEditing(false);
                       setShowDeleteConfirm(false);
+                      setShowRecurringPrompt(null);
                     }}
                     className="p-2 bg-muted rounded-full hover:bg-gray-200 transition-colors"
                   >
@@ -676,12 +914,39 @@ export default function CalendarPage() {
                 </div>
               )}
 
+              {/* Recurring Action Prompt */}
+              {showRecurringPrompt && (
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-600 font-medium">
+                    This is a repeating event. {showRecurringPrompt === "edit" ? "Edit" : "Delete"}:
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => handleRecurringAction("this")}
+                      className="flex-1 py-3 bg-muted text-foreground rounded-xl font-bold hover:bg-gray-200 transition-colors text-sm"
+                    >
+                      This event only
+                    </button>
+                    <button
+                      onClick={() => handleRecurringAction("all")}
+                      className={`flex-1 py-3 rounded-xl font-bold transition-colors text-sm ${
+                        showRecurringPrompt === "delete"
+                          ? "bg-red-500 text-white hover:bg-red-600"
+                          : "bg-primary text-primary-foreground hover:opacity-90"
+                      }`}
+                    >
+                      All events
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* View Mode */}
-              {!isEditing && (
+              {!isEditing && !showRecurringPrompt && (
                 <div className="space-y-4">
                   <div>
                     <h4 className="text-2xl font-bold text-gray-900">{selectedEvent.title}</h4>
-                    <div className="flex items-center gap-2 mt-2">
+                    <div className="flex items-center gap-2 mt-2 flex-wrap">
                       <span className={`px-2 py-1 text-xs font-bold rounded-md ${colors[selectedEvent.owner].bg} ${colors[selectedEvent.owner].text} uppercase`}>
                         {selectedEvent.owner === "me"
                           ? userName || "Me"
@@ -692,9 +957,25 @@ export default function CalendarPage() {
                       <span className="text-sm font-medium text-gray-500">
                         {format(parse(selectedEvent.startTime, "HH:mm", new Date()), "h:mm aa")} 
                         {" - "} 
-                        {format(addDays(parse(selectedEvent.startTime, "HH:mm", new Date()), 0).setMinutes(parse(selectedEvent.startTime, "HH:mm", new Date()).getMinutes() + selectedEvent.durationMinutes), "h:mm aa")}
+                        {format(parse(selectedEvent.endTime, "HH:mm", new Date()), "h:mm aa")}
                       </span>
                     </div>
+
+                    {/* Repeat badge */}
+                    {(() => {
+                      const repeatLabel = formatRepeatLabel(
+                        selectedEvent.repeatType as RepeatType,
+                        selectedEvent.repeatDays,
+                        selectedEvent.repeatUntil,
+                      );
+                      if (!repeatLabel) return null;
+                      return (
+                        <div className="flex items-center gap-1.5 mt-2 text-sm text-gray-500">
+                          <Repeat size={14} className="text-gray-400" />
+                          <span>{repeatLabel}</span>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {selectedEvent.description && (
@@ -748,9 +1029,10 @@ export default function CalendarPage() {
                     </div>
                   </div>
 
+                  {/* Time Range */}
                   <div className="flex gap-4">
                     <div className="flex-1">
-                      <label className="text-sm font-medium text-muted-foreground">Time</label>
+                      <label className="text-sm font-medium text-muted-foreground">Start</label>
                       <input
                         type="time"
                         value={editStartTime}
@@ -760,21 +1042,14 @@ export default function CalendarPage() {
                       />
                     </div>
                     <div className="flex-1">
-                      <label className="text-sm font-medium text-muted-foreground">Duration</label>
-                      <select
-                        value={editDuration}
-                        onChange={(e) => setEditDuration(e.target.value)}
+                      <label className="text-sm font-medium text-muted-foreground">End</label>
+                      <input
+                        type="time"
+                        value={editEndTime}
+                        onChange={(e) => setEditEndTime(e.target.value)}
                         className="w-full mt-1 px-4 py-3 rounded-xl border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary transition-all"
-                      >
-                        <option value="15">15 min</option>
-                        <option value="30">30 min</option>
-                        <option value="45">45 min</option>
-                        <option value="60">1 hour</option>
-                        <option value="90">1.5 hours</option>
-                        <option value="120">2 hours</option>
-                        <option value="180">3 hours</option>
-                        <option value="240">4 hours</option>
-                      </select>
+                        required
+                      />
                     </div>
                   </div>
 
@@ -811,7 +1086,7 @@ export default function CalendarPage() {
                     </div>
                     <h3 className="text-xl font-bold text-gray-900 mb-2">Delete Event?</h3>
                     <p className="text-gray-500 mb-6">
-                      Are you sure you want to delete "{selectedEvent.title}"? This action cannot be undone.
+                      Are you sure you want to delete &quot;{selectedEvent.title}&quot;? This action cannot be undone.
                     </p>
                     <div className="flex gap-3 w-full">
                       <button
