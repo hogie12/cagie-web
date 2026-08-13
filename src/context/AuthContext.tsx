@@ -52,7 +52,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const messaging = await initializeMessaging();
         if (messaging) {
           const token = await getToken(messaging, {
-            // vapidKey: "YOUR_PUBLIC_VAPID_KEY_HERE" // Only needed if custom push service, Firebase default works for many cases
+            vapidKey: "BH3y98ZQc84XqQwho2T98ZDRstqT5kaPHqYVhmqKaOc0RxNQAgTYhdlbJjGLbK4755Ysgd0kRprPHzW0WI3VZDQ",
           });
           if (token) {
             const userDocRef = doc(db, "users", user.uid);

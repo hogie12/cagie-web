@@ -66,8 +66,6 @@ export const onDashboardUpdate = onDocumentWritten(
     if (!title || !senderId) return null; // No relevant change
 
     // Find the partner's user document to get their FCM tokens
-    // We assume the coupleId document has an array of `users` or we find the other user
-    // Since we don't have the exact schema of `couples/{coupleId}`, we'll query for users whose coupleId matches, excluding the sender.
     const usersSnapshot = await admin
       .firestore()
       .collection("users")
@@ -81,51 +79,56 @@ export const onDashboardUpdate = onDocumentWritten(
     }
 
     const partnerData = partnerDocs[0].data();
-    const fcmTokens = partnerData.fcmTokens || [];
+    const fcmTokens: string[] = partnerData.fcmTokens || [];
 
     if (fcmTokens.length === 0) {
       console.log("Partner has no FCM tokens registered.");
       return null;
     }
 
-    const payload = {
-      notification: {
-        title,
-        body,
-        icon: "/apple-icon.png", // Ensure this exists in public/
-        clickAction: "https://cagie-planner.web.app/home", // Example URL, might need adjustment based on exact domain
-      },
-    };
+    // Use the modern send API (sendToDevice was removed in firebase-admin v12)
+    const tokensToRemove: string[] = [];
 
-    try {
-      const response = await admin.messaging().sendToDevice(fcmTokens, payload);
-      console.log("Successfully sent message:", response);
-      // Optional: Cleanup invalid tokens
-      const tokensToRemove: string[] = [];
-      response.results.forEach((result, index) => {
-        const error = result.error;
-        if (error) {
-          console.error(
-            "Failure sending notification to",
-            fcmTokens[index],
-            error,
-          );
-          if (
-            error.code === "messaging/invalid-registration-token" ||
-            error.code === "messaging/registration-token-not-registered"
-          ) {
-            tokensToRemove.push(fcmTokens[index]);
-          }
-        }
-      });
-      if (tokensToRemove.length > 0) {
-        await partnerDocs[0].ref.update({
-          fcmTokens: admin.firestore.FieldValue.arrayRemove(...tokensToRemove),
+    const sendPromises = fcmTokens.map(async (token) => {
+      try {
+        await admin.messaging().send({
+          token,
+          notification: {
+            title,
+            body,
+          },
+          webpush: {
+            notification: {
+              icon: "/web-app-manifest-192x192.png",
+            },
+            fcmOptions: {
+              link: "https://cagie-web.web.app/home",
+            },
+          },
         });
+        console.log("Successfully sent notification to token:", token.substring(0, 20) + "...");
+      } catch (error: any) {
+        console.error("Failed to send to token:", token.substring(0, 20) + "...", error?.code || error);
+        if (
+          error?.code === "messaging/invalid-registration-token" ||
+          error?.code === "messaging/registration-token-not-registered" ||
+          error?.code === "messaging/invalid-argument"
+        ) {
+          tokensToRemove.push(token);
+        }
       }
-    } catch (error) {
-      console.error("Error sending message:", error);
+    });
+
+    await Promise.all(sendPromises);
+
+    // Clean up invalid tokens
+    if (tokensToRemove.length > 0) {
+      console.log("Removing invalid tokens:", tokensToRemove.length);
+      await partnerDocs[0].ref.update({
+        fcmTokens: admin.firestore.FieldValue.arrayRemove(...tokensToRemove),
+      });
     }
+
     return;
   },
 );

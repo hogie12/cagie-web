@@ -11,6 +11,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "CAGIE - Couple Planner",
   description: "Aesthetic Couple Date Planner & Calendar",
+  manifest: "/manifest.json",
 };
 
 export const viewport: Viewport = {
