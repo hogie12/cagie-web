@@ -27,15 +27,18 @@ export const onDashboardUpdate = onDocumentWritten(
     const historyWrites: any[] = [];
 
     for (const uid of Object.keys(newGreetings)) {
-      if (!oldGreetings[uid] || newGreetings[uid].updatedAt !== oldGreetings[uid].updatedAt) {
+      if (
+        !oldGreetings[uid] ||
+        newGreetings[uid].updatedAt !== oldGreetings[uid].updatedAt
+      ) {
         title = "New Greeting! 💕";
-        body = `Your partner left a greeting: "${newGreetings[uid].text}"`;
+        body = `"${newGreetings[uid].text}"`;
         senderId = uid;
         historyWrites.push({
           type: "greeting",
           uid,
           text: newGreetings[uid].text,
-          updatedAt: newGreetings[uid].updatedAt
+          updatedAt: newGreetings[uid].updatedAt,
         });
       }
     }
@@ -49,15 +52,20 @@ export const onDashboardUpdate = onDocumentWritten(
           type: "pap",
           uid,
           url: newPaps[uid].url,
-          updatedAt: newPaps[uid].updatedAt
+          updatedAt: newPaps[uid].updatedAt,
         });
       }
     }
 
     if (historyWrites.length > 0) {
       const batch = admin.firestore().batch();
-      historyWrites.forEach(hw => {
-        const docRef = admin.firestore().collection("couples").doc(coupleId).collection("history").doc();
+      historyWrites.forEach((hw) => {
+        const docRef = admin
+          .firestore()
+          .collection("couples")
+          .doc(coupleId)
+          .collection("history")
+          .doc();
         batch.set(docRef, hw);
       });
       await batch.commit();
@@ -106,9 +114,16 @@ export const onDashboardUpdate = onDocumentWritten(
             },
           },
         });
-        console.log("Successfully sent notification to token:", token.substring(0, 20) + "...");
+        console.log(
+          "Successfully sent notification to token:",
+          token.substring(0, 20) + "...",
+        );
       } catch (error: any) {
-        console.error("Failed to send to token:", token.substring(0, 20) + "...", error?.code || error);
+        console.error(
+          "Failed to send to token:",
+          token.substring(0, 20) + "...",
+          error?.code || error,
+        );
         if (
           error?.code === "messaging/invalid-registration-token" ||
           error?.code === "messaging/registration-token-not-registered" ||
