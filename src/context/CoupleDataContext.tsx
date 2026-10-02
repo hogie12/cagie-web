@@ -51,12 +51,31 @@ interface Snapshot {
   error: string | null;
 }
 
-/** Map a stored event to the viewer's perspective (me / partner / us). */
+/**
+ * Stored `owner` is from the writer's perspective; `ownerId` is absolute.
+ * Resolve to the viewer's perspective (me / partner / us).
+ */
+function viewerOwner(ownerId: unknown, storedOwner: EventOwner | undefined, uid: string | undefined): EventOwner {
+  if (ownerId === "us") return "us";
+  if (typeof ownerId === "string" && ownerId) return ownerId === uid ? "me" : "partner";
+  return storedOwner || "us";
+}
+
+/** Map a stored event to the viewer's perspective. */
 function toCalendarEvent(id: string, data: DocumentData, uid: string | undefined): CalendarEvent {
-  let owner: EventOwner = data.owner || "us";
-  if (data.ownerId) {
-    if (data.ownerId === "us") owner = "us";
-    else owner = data.ownerId === uid ? "me" : "partner";
+  const owner = viewerOwner(data.ownerId, data.owner, uid);
+
+  // Per-occurrence overrides carry their own owner, also from the writer's perspective.
+  let exceptions: CalendarEvent["exceptions"] = data.exceptions;
+  if (exceptions) {
+    exceptions = Object.fromEntries(
+      Object.entries(exceptions).map(([date, exc]) => [
+        date,
+        exc.owner !== undefined || exc.ownerId !== undefined
+          ? { ...exc, owner: viewerOwner(exc.ownerId, exc.owner, uid) }
+          : exc,
+      ]),
+    );
   }
 
   const startTime: string = data.startTime || "12:00";
@@ -72,6 +91,7 @@ function toCalendarEvent(id: string, data: DocumentData, uid: string | undefined
     startTime,
     endTime: endTime || minutesToTime(timeToMinutes(startTime) + 60),
     owner,
+    ...(exceptions ? { exceptions } : {}),
   };
 }
 
