@@ -1,0 +1,35 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMember(coupleId) {
+      return signedIn()
+        && request.auth.uid in firestore.get(/databases/(default)/documents/couples/$(coupleId)).data.members;
+    }
+
+    // Images only, max 10 MB (the client downsizes photos before upload).
+    function isImageUpload() {
+      return request.resource.contentType.matches('image/.*')
+        && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    // Daily photos shared inside a couple.
+    match /couples/{coupleId}/{fileName} {
+      allow read: if isMember(coupleId);
+      allow create: if isMember(coupleId) && isImageUpload();
+      allow update, delete: if false;
+    }
+
+    // Profile pictures.
+    match /users/{userId}/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == userId && isImageUpload();
+      allow delete: if signedIn() && request.auth.uid == userId;
+    }
+  }
+}

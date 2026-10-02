@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { doc, setDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Heart, Eye, EyeOff } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import { errorMessage } from "@/lib/errors";
 
 export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -17,6 +19,12 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
+
+  // Already signed in (or just signed in): let the root page route to /pair or /home.
+  useEffect(() => {
+    if (!authLoading && user) router.replace("/");
+  }, [authLoading, user, router]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,17 +36,15 @@ export default function LoginPage() {
         await signInWithEmailAndPassword(auth, email, password);
       } else {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        await setDoc(doc(db, "users", userCredential.user.uid), {
-          email: userCredential.user.email,
-          name: name,
-          coupleId: null,
-          createdAt: new Date(),
-        });
+        // Merge: AuthContext may have already created the empty profile doc.
+        await setDoc(
+          doc(db, "users", userCredential.user.uid),
+          { email: userCredential.user.email, name: name.trim() },
+          { merge: true },
+        );
       }
-      router.push("/pair");
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
+    } catch (err) {
+      setError(errorMessage(err));
       setLoading(false);
     }
   };
@@ -90,6 +96,8 @@ export default function LoginPage() {
                   <div className="relative">
                     <input
                       type="text"
+                      autoComplete="name"
+                      aria-label="Your name"
                       placeholder="Your Name"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
@@ -103,6 +111,8 @@ export default function LoginPage() {
             <div className="relative">
               <input
                 type="email"
+                autoComplete="email"
+                aria-label="Email address"
                 placeholder="Email Address"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -113,6 +123,9 @@ export default function LoginPage() {
             <div className="relative">
               <input
                 type={showPassword ? "text" : "password"}
+                autoComplete={isLogin ? "current-password" : "new-password"}
+                aria-label="Password"
+                minLength={6}
                 placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -122,6 +135,7 @@ export default function LoginPage() {
               <button 
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
                 className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors focus:outline-none rounded-md"
               >
                 {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}

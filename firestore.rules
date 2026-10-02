@@ -3,38 +3,94 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function couple(coupleId) {
+      return get(/databases/$(database)/documents/couples/$(coupleId));
+    }
+
+    function isMember(coupleId) {
+      return signedIn() && request.auth.uid in couple(coupleId).data.members;
+    }
+
+    function myCoupleId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('coupleId', null);
+    }
+
+    // Only these keys changed between the stored doc and the incoming one.
+    function onlyChanged(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // A map field where the caller only touched their own entry.
+    function onlyOwnEntry(field) {
+      return request.resource.data.get(field, {})
+        .diff(resource == null ? {} : resource.data.get(field, {}))
+        .affectedKeys()
+        .hasOnly([request.auth.uid]);
+    }
+
     // ─── Users ───
-    // Anyone authenticated can read users (needed for pair code lookup).
-    // Only the document owner can write their own profile.
+    // Readable by the owner and by their partner. Pairing (coupleId) is only
+    // ever written by the pairWithCode Cloud Function.
     match /users/{userId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null && request.auth.uid == userId
-                    // Also allow a partner to set coupleId on the other user during pairing
-                    || (request.auth != null
-                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['coupleId']));
+      allow read: if signedIn()
+                  && (request.auth.uid == userId
+                      || (resource.data.get('coupleId', null) != null
+                          && resource.data.coupleId == myCoupleId()));
+
+      allow create: if signedIn()
+                    && request.auth.uid == userId
+                    && request.resource.data.keys().hasOnly(['email', 'name', 'photoURL', 'coupleId', 'createdAt'])
+                    && request.resource.data.get('coupleId', null) == null;
+
+      allow update: if signedIn()
+                    && request.auth.uid == userId
+                    && onlyChanged(['name', 'photoURL', 'fcmTokens', 'email']);
     }
 
     // ─── Couples ───
+    // Created and joined only through the pairWithCode Cloud Function.
     match /couples/{coupleId} {
-      // Only members of the couple can read
-      allow read: if request.auth != null
-                  && request.auth.uid in resource.data.members;
+      allow read: if signedIn() && request.auth.uid in resource.data.members;
+      allow write: if false;
 
-      // Any authenticated user can create a couple (during pairing)
-      allow create: if request.auth != null
-                    && request.auth.uid in request.resource.data.members;
-
-      // Only members can update (e.g. adding a second member)
-      allow update: if request.auth != null
-                    && (request.auth.uid in resource.data.members
-                        || request.auth.uid in request.resource.data.members);
-
-      // ─── Subcollections under couples (events, notes, dashboard) ───
-      match /{subcollection}/{docId} {
-        allow read, write: if request.auth != null
-                           && request.auth.uid in get(/databases/$(database)/documents/couples/$(coupleId)).data.members;
+      match /events/{eventId} {
+        allow read, write: if isMember(coupleId);
       }
+
+      match /notes/{noteId} {
+        allow read: if isMember(coupleId);
+        allow create: if isMember(coupleId)
+                      && request.resource.data.createdBy == request.auth.uid;
+        // Either partner may move a note; nobody may re-assign its author.
+        allow update: if isMember(coupleId)
+                      && !('createdBy' in request.resource.data.diff(resource.data).affectedKeys());
+        allow delete: if isMember(coupleId)
+                      && resource.data.createdBy == request.auth.uid;
+      }
+
+      match /dashboard/{docId} {
+        allow read: if isMember(coupleId);
+        // Each partner may only write their own greeting / photo entry.
+        allow create, update: if isMember(coupleId)
+                              && request.resource.data.keys().hasOnly(['greetings', 'paps'])
+                              && onlyOwnEntry('greetings')
+                              && onlyOwnEntry('paps');
+        allow delete: if false;
+      }
+
+      match /history/{entryId} {
+        allow read: if isMember(coupleId);
+        allow write: if false;
+      }
+    }
+
+    // Invite codes are private to Cloud Functions.
+    match /inviteCodes/{code} {
+      allow read, write: if false;
     }
   }
 }

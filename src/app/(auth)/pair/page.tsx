@@ -3,131 +3,122 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
-import { db, auth } from "@/lib/firebase";
-import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, arrayUnion } from "firebase/firestore";
-import { signOut } from "firebase/auth";
+import { functions } from "@/lib/firebase";
+import { httpsCallable } from "firebase/functions";
 import { motion } from "framer-motion";
-import { Copy, CheckCircle2, ArrowRight, LogOut } from "lucide-react";
+import { Copy, CheckCircle2, ArrowRight, LogOut, Share2, RefreshCw } from "lucide-react";
+import { errorMessage } from "@/lib/errors";
+import { FullScreenSpinner } from "@/components/Spinner";
+
+const CODE_LENGTH = 6;
+
+const getInviteCode = httpsCallable<void, { code: string | null; paired: boolean }>(
+  functions,
+  "getInviteCode",
+);
+const pairWithCode = httpsCallable<{ code: string }, { coupleId: string }>(
+  functions,
+  "pairWithCode",
+);
 
 export default function PairPage() {
-  const { user, coupleId, setCoupleId } = useAuth();
+  const { user, loading: authLoading, coupleId, logout } = useAuth();
   const router = useRouter();
-  
-  const [inviteCode, setInviteCode] = useState("");
+
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [codeError, setCodeError] = useState("");
   const [partnerCode, setPartnerCode] = useState("");
   const [copied, setCopied] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [joining, setJoining] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const uid = user?.uid;
 
   useEffect(() => {
-    if (!user) {
-      router.push("/login");
-      return;
-    }
+    if (authLoading) return;
+    if (!user) router.replace("/login");
+    else if (coupleId) router.replace("/home");
+  }, [authLoading, user, coupleId, router]);
 
-    if (coupleId) {
-      router.push("/home");
-      return;
-    }
-
-    const checkOrCreateCode = async () => {
-      try {
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        
-        let code = userSnap.data()?.personalInviteCode;
-        if (!code) {
-          code = Math.floor(100000 + Math.random() * 900000).toString();
-          await updateDoc(userRef, { personalInviteCode: code });
-        }
-        setInviteCode(code);
-      } catch (err) {
+  useEffect(() => {
+    if (authLoading || !uid || coupleId) return;
+    let cancelled = false;
+    getInviteCode()
+      .then((res) => {
+        if (cancelled) return;
+        setInviteCode(res.data.code);
+        setCodeError("");
+      })
+      .catch((err) => {
         console.error(err);
-      } finally {
-        setLoading(false);
-      }
+        if (!cancelled) setCodeError(errorMessage(err, "Couldn't load your invite code."));
+      });
+    return () => {
+      cancelled = true;
     };
+  }, [authLoading, uid, coupleId, reloadKey]);
 
-    checkOrCreateCode();
-  }, [user, coupleId, router]);
+  const copyCode = async () => {
+    if (!inviteCode) return;
+    try {
+      await navigator.clipboard.writeText(inviteCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard can be blocked (e.g. insecure context); the code is still visible.
+    }
+  };
 
-  const copyCode = () => {
-    navigator.clipboard.writeText(inviteCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const shareCode = async () => {
+    if (!inviteCode) return;
+    try {
+      await navigator.share({
+        title: "Join me on Cagie 💕",
+        text: `Pair with me on Cagie! My code is ${inviteCode}`,
+        url: window.location.origin,
+      });
+    } catch {
+      // User cancelled the share sheet.
+    }
   };
 
   const handleLogout = async () => {
-    await signOut(auth);
-    router.push("/login");
+    await logout();
+    router.replace("/login");
   };
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!partnerCode || partnerCode.length !== 6) {
-      setError("Please enter a valid 6-digit code.");
+    const code = partnerCode.trim().toUpperCase();
+    if (code.length !== CODE_LENGTH) {
+      setError(`Please enter the ${CODE_LENGTH}-character code.`);
       return;
     }
-
-    if (partnerCode === inviteCode) {
-      setError("You cannot use your own code.");
+    if (code === inviteCode) {
+      setError("That's your own code — share it with your partner instead.");
       return;
     }
 
     setJoining(true);
     setError("");
-
     try {
-      const usersRef = collection(db, "users");
-      const q = query(usersRef, where("personalInviteCode", "==", partnerCode));
-      const querySnapshot = await getDocs(q);
-
-      if (querySnapshot.empty) {
-        setError("Invalid code. Partner not found.");
-        setJoining(false);
-        return;
-      }
-
-      const partnerDoc = querySnapshot.docs[0];
-      const partnerData = partnerDoc.data();
-      const partnerId = partnerDoc.id;
-
-      let sharedCoupleId = partnerData.coupleId;
-
-      if (!sharedCoupleId) {
-        const newCoupleRef = doc(collection(db, "couples"));
-        sharedCoupleId = newCoupleRef.id;
-
-        await setDoc(newCoupleRef, {
-          members: [partnerId, user?.uid],
-          createdAt: new Date()
-        });
-
-        await updateDoc(doc(db, "users", partnerId), { coupleId: sharedCoupleId });
-      } else {
-        const coupleRef = doc(db, "couples", sharedCoupleId);
-        await updateDoc(coupleRef, {
-          members: arrayUnion(user?.uid)
-        });
-      }
-
-      await updateDoc(doc(db, "users", user!.uid), { coupleId: sharedCoupleId });
-      
-      setCoupleId(sharedCoupleId);
-      router.push("/home");
-      
-    } catch (err: any) {
-      setError("Error pairing: " + err.message);
+      await pairWithCode({ code });
+      // AuthContext picks up the new coupleId from the profile snapshot and the
+      // effect above redirects to /home.
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't pair. Please try again."));
       setJoining(false);
     }
   };
 
-  if (loading) return null;
+  if (authLoading || !user || coupleId) return <FullScreenSpinner />;
+
+  const canShare = typeof navigator !== "undefined" && "share" in navigator;
 
   return (
     <div className="min-h-[100dvh] flex items-center justify-center bg-background p-4 relative overflow-hidden">
-      <button 
+      <button
         onClick={handleLogout}
         className="absolute top-4 right-4 flex items-center gap-2 px-4 py-2 bg-card border border-border hover:bg-muted backdrop-blur-sm rounded-full text-sm font-medium text-destructive transition-colors z-20 shadow-sm"
       >
@@ -152,18 +143,47 @@ export default function PairPage() {
 
           <div className="bg-card p-6 rounded-2xl border border-border shadow-sm">
             <p className="text-sm font-medium text-muted-foreground mb-3">YOUR INVITE CODE</p>
-            <div className="flex items-center justify-center space-x-4">
-              <span className="text-4xl font-mono font-bold tracking-widest text-primary">
-                {inviteCode}
-              </span>
-              <button 
-                onClick={copyCode}
-                className="p-2 bg-muted text-muted-foreground hover:text-foreground rounded-xl transition-colors"
-                title="Copy to clipboard"
-              >
-                {copied ? <CheckCircle2 className="text-green-500" size={24} /> : <Copy size={24} />}
-              </button>
-            </div>
+            {codeError ? (
+              <div className="space-y-3">
+                <p className="text-sm text-destructive">{codeError}</p>
+                <button
+                  onClick={() => setReloadKey((k) => k + 1)}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-muted rounded-xl text-sm font-medium hover:bg-border transition-colors"
+                >
+                  <RefreshCw size={16} /> Try again
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center gap-3">
+                <span
+                  className="text-4xl font-mono font-bold tracking-widest text-foreground min-w-[9ch]"
+                  aria-live="polite"
+                >
+                  {inviteCode ?? "······"}
+                </span>
+                <button
+                  onClick={copyCode}
+                  disabled={!inviteCode}
+                  className="p-2 bg-muted text-muted-foreground hover:text-foreground rounded-xl transition-colors disabled:opacity-50"
+                  aria-label="Copy code"
+                  title="Copy to clipboard"
+                >
+                  {copied ? <CheckCircle2 className="text-green-500" size={24} /> : <Copy size={24} />}
+                </button>
+                {canShare && (
+                  <button
+                    onClick={shareCode}
+                    disabled={!inviteCode}
+                    className="p-2 bg-muted text-muted-foreground hover:text-foreground rounded-xl transition-colors disabled:opacity-50"
+                    aria-label="Share code"
+                    title="Share"
+                  >
+                    <Share2 size={24} />
+                  </button>
+                )}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground mt-3">Codes expire after 7 days.</p>
           </div>
 
           <div className="relative">
@@ -176,25 +196,26 @@ export default function PairPage() {
           </div>
 
           <form onSubmit={handleJoin} className="space-y-4">
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Enter 6-digit code"
-                maxLength={6}
-                value={partnerCode}
-                onChange={(e) => setPartnerCode(e.target.value.replace(/\D/g, ''))}
-                className="w-full px-4 py-4 rounded-xl border border-border bg-card text-center text-xl font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-ring transition-all uppercase"
-                required
-              />
-            </div>
-            
-            {error && (
-              <p className="text-destructive text-sm">{error}</p>
-            )}
+            <input
+              type="text"
+              inputMode="text"
+              autoCapitalize="characters"
+              autoComplete="off"
+              spellCheck={false}
+              aria-label="Partner's code"
+              placeholder="Partner's code"
+              maxLength={CODE_LENGTH}
+              value={partnerCode}
+              onChange={(e) => setPartnerCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
+              className="w-full px-4 py-4 rounded-xl border border-border bg-card text-center text-xl font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-ring transition-all placeholder:tracking-normal placeholder:font-sans placeholder:text-base"
+              required
+            />
+
+            {error && <p className="text-destructive text-sm" role="alert">{error}</p>}
 
             <button
               type="submit"
-              disabled={joining || partnerCode.length !== 6}
+              disabled={joining || partnerCode.length !== CODE_LENGTH}
               className="w-full py-4 px-4 bg-foreground text-background rounded-xl font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 flex justify-center items-center gap-2"
             >
               {joining ? "Connecting..." : "Connect Accounts"}
