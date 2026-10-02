@@ -181,7 +181,7 @@ export function DayTimeline({
                   e.stopPropagation();
                   onEventClick(event);
                 }}
-                className={`absolute rounded-lg px-2 overflow-hidden text-left shadow-sm ring-1 ring-card hover:brightness-95 active:scale-[0.99] transition ${
+                className={`absolute flex flex-col justify-start rounded-lg px-2 overflow-hidden text-left shadow-sm ring-1 ring-card hover:brightness-95 active:scale-[0.99] transition ${
                   OWNER_THEME[event.owner].solid
                 } ${hasEnded(event) ? "opacity-55" : ""} ${compact ? "py-0.5" : "py-1"}`}
                 style={{

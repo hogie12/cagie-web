@@ -242,7 +242,12 @@ export default function CalendarPage() {
   };
 
   // Keyboard shortcuts (desktop): ←/→, T, N, D/M/A.
-  const sheetOpen = sheet.kind !== "none";
+  // The event being viewed can disappear (e.g. the partner deleted it); then the sheet closes.
+  const detailEvent =
+    sheet.kind === "detail"
+      ? (occurrencesOn(sheet.dateStr).find((e) => e.id === sheet.eventId) ?? null)
+      : null;
+  const sheetOpen = sheet.kind === "form" || detailEvent !== null;
   const createOnSelected = () => openCreate(view === "agenda" ? todayStr : selectedDateStr);
   const createRef = useLatest(createOnSelected);
   useEffect(() => {
@@ -274,22 +279,20 @@ export default function CalendarPage() {
 
   let sheetTitle = "";
   let sheetBody: React.ReactNode = null;
-  if (sheet.kind === "detail") {
-    const event = occurrencesOn(sheet.dateStr).find((e) => e.id === sheet.eventId);
-    if (event) {
-      sheetTitle = "Event";
-      sheetBody = (
-        <EventDetail
-          key={event.id}
-          event={event}
-          template={findTemplate(event)}
-          names={names}
-          onEdit={(scope) => openEdit(event, scope)}
-          onDuplicate={() => openDuplicate(event)}
-          onDelete={(scope) => handleDelete(event, scope)}
-        />
-      );
-    }
+  if (detailEvent) {
+    const event = detailEvent;
+    sheetTitle = "Event";
+    sheetBody = (
+      <EventDetail
+        key={event.id}
+        event={event}
+        template={findTemplate(event)}
+        names={names}
+        onEdit={(scope) => openEdit(event, scope)}
+        onDuplicate={() => openDuplicate(event)}
+        onDelete={(scope) => handleDelete(event, scope)}
+      />
+    );
   } else if (sheet.kind === "form") {
     sheetTitle = sheet.title;
     sheetBody = (
