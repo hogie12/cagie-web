@@ -1,132 +1,171 @@
-import React from "react";
 import {
-  format,
-  startOfMonth,
-  endOfMonth,
-  startOfWeek,
-  endOfWeek,
+  addMonths,
   eachDayOfInterval,
+  endOfMonth,
+  endOfWeek,
+  format,
+  isSameDay,
   isSameMonth,
   isToday,
-  isSameDay,
+  startOfMonth,
+  startOfWeek,
 } from "date-fns";
-import { CalendarEvent, EventOwner } from "@/context/CoupleDataContext";
+import { ArrowRight, Plus } from "lucide-react";
+import { CalendarEvent, toDateStr } from "@/lib/recurrence";
+import { useSwipe } from "@/hooks/useSwipe";
+import { OWNER_THEME, OwnerNames, relativeDayLabel } from "../calendarUtils";
+import { OwnerDots } from "./OwnerDots";
+import { EventRow } from "./EventRow";
 
 interface MonthlyGridProps {
   selectedDate: Date;
-  setSelectedDate: (date: Date) => void;
-  events: CalendarEvent[];
-  colors: Record<EventOwner, { bg: string; text: string; panel: string }>;
-  setViewMode: (mode: "daily" | "monthly") => void;
-  showMe: boolean;
-  showPartner: boolean;
-  showUs: boolean;
+  eventsByDate: Map<string, CalendarEvent[]>;
+  names: OwnerNames;
+  onSelectDate: (date: Date) => void;
+  onOpenDay: (date: Date) => void;
+  onAdd: (date: Date) => void;
+  onEventClick: (event: CalendarEvent) => void;
+}
+
+const WEEKDAY_HEADERS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/** Visible date range of the month grid (full weeks, Monday start). */
+export function monthGridRange(date: Date) {
+  return {
+    start: startOfWeek(startOfMonth(date), { weekStartsOn: 1 }),
+    end: endOfWeek(endOfMonth(date), { weekStartsOn: 1 }),
+  };
 }
 
 export default function MonthlyGrid({
   selectedDate,
-  setSelectedDate,
-  events,
-  colors,
-  setViewMode,
-  showMe,
-  showPartner,
-  showUs,
+  eventsByDate,
+  names,
+  onSelectDate,
+  onOpenDay,
+  onAdd,
+  onEventClick,
 }: MonthlyGridProps) {
-  const monthStart = startOfMonth(selectedDate);
-  const monthEnd = endOfMonth(monthStart);
-  const startDate = startOfWeek(monthStart, { weekStartsOn: 1 }); // Monday start
-  const endDate = endOfWeek(monthEnd, { weekStartsOn: 1 });
-  
-  const days = eachDayOfInterval({ start: startDate, end: endDate });
+  const { start, end } = monthGridRange(selectedDate);
+  const days = eachDayOfInterval({ start, end });
+  const swipe = useSwipe(
+    () => onSelectDate(startOfMonth(addMonths(selectedDate, 1))),
+    () => onSelectDate(startOfMonth(addMonths(selectedDate, -1))),
+  );
 
-  const weekDaysHeader = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-  const handleDayClick = (day: Date) => {
-    setSelectedDate(day);
-    setViewMode("daily");
-  };
+  const selectedEvents = eventsByDate.get(toDateStr(selectedDate)) ?? [];
 
   return (
-    <div className="flex-1 overflow-y-auto bg-gray-50/30 p-2 pb-[100px] md:pb-2">
-      <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
-        {/* Days Header */}
-        <div className="grid grid-cols-7 border-b border-gray-100 bg-gray-50/50">
-          {weekDaysHeader.map((day) => (
+    <div className="flex-1 overflow-y-auto overscroll-contain px-2 sm:px-4 pb-[100px] md:pb-6">
+      <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm" {...swipe}>
+        <div className="grid grid-cols-7 border-b border-border bg-muted/50">
+          {WEEKDAY_HEADERS.map((day) => (
             <div
               key={day}
-              className="py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider"
+              className="py-2 text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider"
             >
-              {day}
+              <span className="sm:hidden">{day[0]}</span>
+              <span className="hidden sm:inline">{day}</span>
             </div>
           ))}
         </div>
 
-        {/* Grid */}
         <div className="grid grid-cols-7">
           {days.map((day, idx) => {
-            const isCurrentMonth = isSameMonth(day, monthStart);
-            const isSelected = isSameDay(day, selectedDate);
-            const isCurrentToday = isToday(day);
-
-            const dayStr = format(day, "yyyy-MM-dd");
-            const dayEvents = events.filter((e) => {
-              if (e.dateStr !== dayStr) return false;
-              if (e.owner === "me" && !showMe) return false;
-              if (e.owner === "partner" && !showPartner) return false;
-              if (e.owner === "us" && !showUs) return false;
-              return true;
-            }).sort((a, b) => a.startTime.localeCompare(b.startTime));
+            const inMonth = isSameMonth(day, selectedDate);
+            const selected = isSameDay(day, selectedDate);
+            const today = isToday(day);
+            const dayEvents = eventsByDate.get(toDateStr(day)) ?? [];
 
             return (
-              <div
-                key={day.toString()}
-                onClick={() => handleDayClick(day)}
-                className={`min-h-[100px] border-b border-r border-gray-100 p-1.5 cursor-pointer transition-colors hover:bg-gray-50 flex flex-col
-                  ${!isCurrentMonth ? "bg-gray-50/50" : "bg-white"}
-                  ${idx % 7 === 6 ? "border-r-0" : ""}
-                `}
+              <button
+                key={day.toISOString()}
+                onClick={() => (selected ? onOpenDay(day) : onSelectDate(day))}
+                onDoubleClick={() => onOpenDay(day)}
+                aria-label={`${format(day, "EEEE d MMMM")}, ${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"}`}
+                aria-pressed={selected}
+                className={`min-h-[58px] md:min-h-[104px] p-1 md:p-1.5 flex flex-col items-stretch text-left border-border transition-colors ${
+                  idx % 7 !== 6 ? "border-r" : ""
+                } ${idx < days.length - 7 ? "border-b" : ""} ${
+                  selected ? "bg-primary/15" : inMonth ? "hover:bg-muted/60" : "bg-muted/30 hover:bg-muted/60"
+                }`}
               >
-                {/* Date Number */}
-                <div className="flex justify-end mb-1">
-                  <div
-                    className={`text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full transition-all
-                      ${
-                        isCurrentToday
-                          ? "bg-primary text-white font-bold shadow-sm"
-                          : isSelected
-                            ? "bg-gray-900 text-white font-bold"
-                            : !isCurrentMonth
-                              ? "text-gray-300"
-                              : "text-gray-700"
-                      }
-                    `}
+                <span className="flex justify-center md:justify-end">
+                  <span
+                    className={`text-xs font-semibold w-6 h-6 flex items-center justify-center rounded-full ${
+                      today
+                        ? "bg-foreground text-background"
+                        : !inMonth
+                          ? "text-muted-foreground/50"
+                          : "text-foreground"
+                    }`}
                   >
                     {format(day, "d")}
-                  </div>
-                </div>
+                  </span>
+                </span>
 
-                {/* Events Preview */}
-                <div className="flex flex-col gap-1 flex-1">
+                {/* Phones: owner dots + count */}
+                <span className="md:hidden mt-1 flex flex-col items-center gap-0.5">
+                  <OwnerDots events={dayEvents} />
+                  {dayEvents.length > 1 && (
+                    <span className="text-[9px] font-semibold text-muted-foreground leading-none">
+                      {dayEvents.length}
+                    </span>
+                  )}
+                </span>
+
+                {/* Larger screens: title chips */}
+                <span className="hidden md:flex flex-col gap-0.5 mt-1 min-w-0">
                   {dayEvents.slice(0, 3).map((event) => (
-                    <div
+                    <span
                       key={event.id}
-                      className={`text-[10px] px-1.5 py-0.5 rounded shadow-sm truncate font-medium ${colors[event.owner].bg} ${colors[event.owner].text}`}
+                      className={`text-[11px] px-1.5 py-0.5 rounded truncate font-medium ${OWNER_THEME[event.owner].solid}`}
                     >
+                      {!event.allDay && <span className="opacity-75 mr-1">{event.startTime}</span>}
                       {event.title}
-                    </div>
+                    </span>
                   ))}
                   {dayEvents.length > 3 && (
-                    <div className="text-[10px] text-gray-500 font-medium px-1 mt-auto">
+                    <span className="text-[11px] text-muted-foreground font-medium px-1">
                       +{dayEvents.length - 3} more
-                    </div>
+                    </span>
                   )}
-                </div>
-              </div>
+                </span>
+              </button>
             );
           })}
         </div>
       </div>
+
+      {/* Selected day */}
+      <section className="mt-4 bg-card border border-border rounded-2xl p-3 shadow-sm" aria-live="polite">
+        <div className="flex items-center justify-between px-1 pb-1">
+          <h2 className="font-bold">{relativeDayLabel(selectedDate, true)}</h2>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => onAdd(selectedDate)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-semibold hover:bg-muted transition-colors"
+            >
+              <Plus size={16} /> Add
+            </button>
+            <button
+              onClick={() => onOpenDay(selectedDate)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-semibold bg-muted hover:bg-border transition-colors"
+            >
+              Open day <ArrowRight size={16} />
+            </button>
+          </div>
+        </div>
+        {selectedEvents.length > 0 ? (
+          <div className="flex flex-col">
+            {selectedEvents.map((event) => (
+              <EventRow key={event.id} event={event} names={names} onClick={onEventClick} />
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground px-1 py-3">Nothing planned for this day.</p>
+        )}
+      </section>
     </div>
   );
 }

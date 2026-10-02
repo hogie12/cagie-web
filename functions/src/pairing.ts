@@ -1,5 +1,5 @@
 import { randomInt } from "crypto";
-import * as admin from "firebase-admin";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 const REGION = "asia-southeast2";
@@ -8,7 +8,7 @@ const CODE_LENGTH = 6;
 const CODE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_ATTEMPTS_PER_HOUR = 10;
 
-const db = () => admin.firestore();
+const db = () => getFirestore();
 
 function generateCode(): string {
   let code = "";
@@ -112,7 +112,7 @@ export const pairWithCode = onCall({ region: REGION }, async (request) => {
     const coupleRef = db().collection("couples").doc();
     tx.create(coupleRef, {
       members: [partnerUid, uid],
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
     });
     tx.update(meRef, { coupleId: coupleRef.id });
     tx.update(partnerRef, { coupleId: coupleRef.id });

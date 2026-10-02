@@ -1,4 +1,5 @@
-import * as admin from "firebase-admin";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
+import { getMessaging } from "firebase-admin/messaging";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 
 const APP_URL = process.env.APP_URL || "https://cagie-web.web.app";
@@ -41,7 +42,7 @@ export const onDashboardUpdate = onDocumentWritten(
     const papUids = changedUids(before?.paps || {}, newPaps);
     if (greetingUids.length === 0 && papUids.length === 0) return;
 
-    const firestore = admin.firestore();
+    const firestore = getFirestore();
     const historyRef = firestore.collection("couples").doc(coupleId).collection("history");
 
     // Deterministic ids keep this idempotent when the event is redelivered.
@@ -97,7 +98,7 @@ export const onDashboardUpdate = onDocumentWritten(
 
         // Notification payload only: the FCM SDK in the service worker displays it
         // and opens `link` on click, so the page must not show it a second time.
-        const response = await admin.messaging().sendEachForMulticast({
+        const response = await getMessaging().sendEachForMulticast({
           tokens,
           notification: { title, body },
           webpush: {
@@ -117,7 +118,7 @@ export const onDashboardUpdate = onDocumentWritten(
         });
         if (stale.length > 0) {
           await userRef.update({
-            fcmTokens: admin.firestore.FieldValue.arrayRemove(...stale),
+            fcmTokens: FieldValue.arrayRemove(...stale),
           });
         }
       }),
