@@ -1,8 +1,12 @@
 [
   {
-    "origin": ["*"],
-    "method": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+    "origin": [
+      "https://cagie-web.web.app",
+      "https://cagie-web.firebaseapp.com",
+      "http://localhost:3000"
+    ],
+    "method": ["GET", "HEAD"],
     "maxAgeSeconds": 3600,
-    "responseHeader": ["*"]
+    "responseHeader": ["Content-Type"]
   }
 ]

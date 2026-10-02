@@ -1,20 +1,22 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useAuth } from "@/context/AuthContext";
-import { auth, db } from "@/lib/firebase";
+import { useAuth, NotificationStatus } from "@/context/AuthContext";
+import { useToast } from "@/context/ToastContext";
+import { db, storage } from "@/lib/firebase";
 import { doc, updateDoc } from "firebase/firestore";
-import { signOut } from "firebase/auth";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  Camera,
-  Save,
-  Loader2,
-  Edit2,
-  CheckCircle2,
-  LogOut,
-} from "lucide-react";
+import { Camera, Save, Loader2, Edit2, LogOut, BellRing } from "lucide-react";
+import { compressImage } from "@/lib/image";
+import { errorMessage } from "@/lib/errors";
+import { Avatar } from "@/components/Avatar";
+
+function initialNotificationStatus(): NotificationStatus {
+  if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
+  return Notification.permission;
+}
 
 export default function ProfilePage() {
   const {
@@ -25,87 +27,93 @@ export default function ProfilePage() {
     partnerPhotoURL,
     coupleId,
     requestNotificationPermission,
+    logout,
   } = useAuth();
   const router = useRouter();
+  const { toast } = useToast();
+  const [notificationStatus, setNotificationStatus] = useState(initialNotificationStatus);
+  const [enablingNotifications, setEnablingNotifications] = useState(false);
 
   const [isEditing, setIsEditing] = useState(false);
   const [nameInput, setNameInput] = useState(userName || "");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewURL, setPreviewURL] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [message, setMessage] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setSelectedFile(file);
-      setPreviewURL(URL.createObjectURL(file));
-    }
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (previewURL) URL.revokeObjectURL(previewURL);
+    setSelectedFile(file);
+    setPreviewURL(URL.createObjectURL(file));
+  };
+
+  const resetEdit = () => {
+    if (previewURL) URL.revokeObjectURL(previewURL);
+    setIsEditing(false);
+    setSelectedFile(null);
+    setPreviewURL(null);
   };
 
   const handleSave = async () => {
     if (!user) return;
     setIsSaving(true);
-    setMessage("");
 
     try {
       let newPhotoURL = userPhotoURL;
 
       if (selectedFile) {
-        // Upload to Cloudinary
-        const formData = new FormData();
-        formData.append("file", selectedFile);
-        formData.append("upload_preset", "cagie-project");
-
-        const res = await fetch(
-          `https://api.cloudinary.com/v1_1/xcp1rumz/image/upload`,
-          {
-            method: "POST",
-            body: formData,
-          },
-        );
-        const data = await res.json();
-
-        if (!res.ok) {
-          throw new Error(
-            data.error?.message || "Failed to upload image to Cloudinary",
-          );
-        }
-
-        newPhotoURL = data.secure_url;
+        const blob = await compressImage(selectedFile, 512);
+        const avatarRef = ref(storage, `users/${user.uid}/avatar_${Date.now()}.jpg`);
+        await uploadBytes(avatarRef, blob, { contentType: blob.type || "image/jpeg" });
+        newPhotoURL = await getDownloadURL(avatarRef);
       }
 
-      // Update Firestore
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        name: nameInput,
+      // The profile snapshot in AuthContext updates the UI everywhere.
+      await updateDoc(doc(db, "users", user.uid), {
+        name: nameInput.trim(),
         ...(newPhotoURL && { photoURL: newPhotoURL }),
       });
 
-      setMessage("Profile updated successfully!");
-      setIsEditing(false);
-
-      // Clear message after a while
-      setTimeout(() => setMessage(""), 3000);
-
-      // Note: The UI will update automatically because AuthContext listens to onAuthStateChanged,
-      // but wait, AuthContext only fetches the profile document ONCE when auth state changes.
-      // To reflect immediately, a full page reload or updating Context state is needed.
-      // Since reloading is easiest for a quick update:
-      window.location.reload();
-    } catch (err: any) {
+      toast("Profile updated", { kind: "success" });
+      resetEdit();
+    } catch (err) {
       console.error(err);
-      setMessage("Failed to save profile: " + err.message);
+      toast("Failed to save profile", { kind: "error", body: errorMessage(err) });
     } finally {
       setIsSaving(false);
     }
   };
 
+  const handleEnableNotifications = async () => {
+    setEnablingNotifications(true);
+    try {
+      const status = await requestNotificationPermission();
+      setNotificationStatus(status);
+      if (status === "granted") toast("Notifications enabled", { kind: "success" });
+      else if (status === "denied")
+        toast("Notifications are blocked", {
+          kind: "error",
+          body: "Allow notifications for this site in your browser settings, then try again.",
+        });
+      else if (status === "unsupported")
+        toast("Not supported here", {
+          kind: "error",
+          body: "On iPhone, add Cagie to your Home Screen first, then enable notifications from there.",
+        });
+    } catch (err) {
+      console.error(err);
+      toast("Couldn't enable notifications", { kind: "error", body: errorMessage(err) });
+    } finally {
+      setEnablingNotifications(false);
+    }
+  };
+
   const handleLogout = async () => {
-    await signOut(auth);
-    router.push("/login");
+    await logout();
+    router.replace("/login");
   };
 
   return (
@@ -118,17 +126,6 @@ export default function ProfilePage() {
       </div>
 
       <div className="p-6 max-w-lg mx-auto w-full space-y-8">
-        {message && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={`p-4 rounded-xl text-sm font-medium flex items-center gap-2 ${message.includes("Failed") ? "bg-red-50 text-red-600" : "bg-green-50 text-green-600"}`}
-          >
-            {message.includes("Failed") ? null : <CheckCircle2 size={18} />}
-            {message}
-          </motion.div>
-        )}
-
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Personal Details</h2>
@@ -138,17 +135,14 @@ export default function ProfilePage() {
                   setNameInput(userName || "");
                   setIsEditing(true);
                 }}
+                aria-label="Edit profile"
                 className="p-2 text-primary hover:bg-primary/10 rounded-full transition-colors"
               >
                 <Edit2 size={18} />
               </button>
             ) : (
               <button
-                onClick={() => {
-                  setIsEditing(false);
-                  setSelectedFile(null);
-                  setPreviewURL(null);
-                }}
+                onClick={resetEdit}
                 className="text-sm text-gray-500 hover:text-gray-700 font-medium"
               >
                 Cancel
@@ -158,35 +152,26 @@ export default function ProfilePage() {
 
           <div className="flex flex-col items-center gap-4">
             <div className="relative group">
-              <div className="w-24 h-24 rounded-full overflow-hidden bg-primary text-white flex items-center justify-center text-3xl font-bold border-4 border-white shadow-md">
-                {previewURL ? (
-                  <img
-                    src={previewURL}
-                    alt="Preview"
-                    className="w-full h-full object-cover"
-                  />
-                ) : userPhotoURL ? (
-                  <img
-                    src={userPhotoURL}
-                    alt="Profile"
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  (userName?.[0] || "U").toUpperCase()
-                )}
-              </div>
+              <Avatar
+                url={previewURL || userPhotoURL}
+                name={userName}
+                fallback="U"
+                className="w-24 h-24 rounded-full text-3xl border-4 border-white shadow-md"
+              />
 
               <AnimatePresence>
                 {isEditing && (
-                  <motion.div
+                  <motion.button
+                    type="button"
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.8 }}
                     className="absolute bottom-0 right-0 bg-gray-900 text-white p-2 rounded-full cursor-pointer shadow-lg hover:bg-gray-800 transition-colors"
                     onClick={() => fileInputRef.current?.click()}
+                    aria-label="Change photo"
                   >
                     <Camera size={16} />
-                  </motion.div>
+                  </motion.button>
                 )}
               </AnimatePresence>
               <input
@@ -251,17 +236,13 @@ export default function ProfilePage() {
         {/* Partner Section */}
         {coupleId ? (
           <div className="bg-[#e5f7f8] p-6 rounded-3xl shadow-sm border border-cyan-100 flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full overflow-hidden bg-[#25b0b9] text-white flex items-center justify-center text-2xl font-bold border-2 border-white shadow-sm">
-              {partnerPhotoURL ? (
-                <img
-                  src={partnerPhotoURL}
-                  alt="Partner"
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                (partnerName?.[0] || "P").toUpperCase()
-              )}
-            </div>
+            <Avatar
+              url={partnerPhotoURL}
+              name={partnerName}
+              fallback="P"
+              colorClassName="bg-[#25b0b9] text-white"
+              className="w-16 h-16 rounded-full text-2xl border-2 border-white shadow-sm"
+            />
             <div>
               <p className="text-sm text-[#25b0b9] font-semibold mb-0.5">
                 Paired With
@@ -292,20 +273,25 @@ export default function ProfilePage() {
             <h3 className="font-semibold text-gray-900">Push Notifications</h3>
             <p className="text-sm text-gray-500 mt-1">Get alerts for new greetings & photos</p>
           </div>
-          <button 
-            onClick={async () => {
-              try {
-                await requestNotificationPermission();
-                setMessage("Notifications enabled!");
-                setTimeout(() => setMessage(""), 3000);
-              } catch (e) {
-                setMessage("Failed to enable notifications");
-              }
-            }}
-            className="px-4 py-2 bg-primary/10 text-primary font-medium rounded-xl hover:bg-primary/20 transition-colors"
-          >
-            Enable
-          </button>
+          {notificationStatus === "granted" ? (
+            // Tapping again re-registers this device (e.g. after reinstalling the PWA).
+            <button
+              onClick={handleEnableNotifications}
+              disabled={enablingNotifications}
+              title="Re-register this device"
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 bg-green-50 rounded-xl hover:bg-green-100 transition-colors disabled:opacity-50"
+            >
+              <BellRing size={16} /> On
+            </button>
+          ) : (
+            <button
+              onClick={handleEnableNotifications}
+              disabled={enablingNotifications}
+              className="px-4 py-2 bg-primary/10 text-foreground font-medium rounded-xl hover:bg-primary/20 transition-colors disabled:opacity-50"
+            >
+              {enablingNotifications ? "Enabling..." : "Enable"}
+            </button>
+          )}
         </div>
 
         <button

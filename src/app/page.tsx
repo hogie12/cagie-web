@@ -3,26 +3,18 @@
 import { useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
+import { FullScreenSpinner } from "@/components/Spinner";
 
 export default function RootPage() {
   const { user, loading, coupleId } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading) {
-      if (!user) {
-        router.push("/login");
-      } else if (!coupleId) {
-        router.push("/pair");
-      } else {
-        router.push("/home");
-      }
-    }
+    if (loading) return;
+    if (!user) router.replace("/login");
+    else if (!coupleId) router.replace("/pair");
+    else router.replace("/home");
   }, [user, loading, coupleId, router]);
 
-  return (
-    <div className="min-h-[100dvh] flex items-center justify-center bg-background">
-      <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-    </div>
-  );
+  return <FullScreenSpinner />;
 }

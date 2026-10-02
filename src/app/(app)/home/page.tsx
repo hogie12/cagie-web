@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- photos are Firebase Storage download URLs */
 
 import { useState, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
@@ -14,44 +15,26 @@ import {
   Camera,
   Send,
 } from "lucide-react";
-import { format, isAfter, parseISO, startOfDay } from "date-fns";
+import { addDays, format, startOfDay } from "date-fns";
+import { noteColor, createdAtMillis } from "@/lib/noteColors";
+import { expandRecurringEvents, toDate, toDateStr } from "@/lib/recurrence";
+import { compressImage } from "@/lib/image";
+import { errorMessage } from "@/lib/errors";
+import { useToast } from "@/context/ToastContext";
+import { Spinner } from "@/components/Spinner";
 
-const COLORS = [
-  {
-    id: "yellow",
-    bg: "bg-[#fef08a]",
-    border: "border-[#fde047]",
-    text: "text-amber-900",
-  },
-  {
-    id: "pink",
-    bg: "bg-[#fbcfe8]",
-    border: "border-[#f9a8d4]",
-    text: "text-pink-900",
-  },
-  {
-    id: "blue",
-    bg: "bg-[#bfdbfe]",
-    border: "border-[#93c5fd]",
-    text: "text-blue-900",
-  },
-  {
-    id: "green",
-    bg: "bg-[#bbf7d0]",
-    border: "border-[#86efac]",
-    text: "text-green-900",
-  },
-  {
-    id: "purple",
-    bg: "bg-[#e9d5ff]",
-    border: "border-[#d8b4fe]",
-    text: "text-purple-900",
-  },
-];
+function timeOfDayGreeting(date: Date): string {
+  const hour = date.getHours();
+  if (hour < 5) return "Good night";
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
 
 export default function HomePage() {
-  const { user, coupleId } = useAuth();
+  const { user, coupleId, userName, partnerName } = useAuth();
   const { events, notes, dashboard, isLoading } = useCoupleData();
+  const { toast } = useToast();
 
   const [greetingInput, setGreetingInput] = useState("");
   const [isUploadingPap, setIsUploadingPap] = useState(false);
@@ -61,7 +44,7 @@ export default function HomePage() {
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+        <Spinner />
       </div>
     );
   }
@@ -70,29 +53,29 @@ export default function HomePage() {
     e.preventDefault();
     if (!greetingInput.trim() || !coupleId || !user) return;
 
-    await setDoc(
-      doc(db, "couples", coupleId, "dashboard", "main"),
-      {
-        greetings: {
-          [user.uid]: {
-            text: greetingInput.trim(),
-            updatedAt: Date.now()
-          }
-        }
-      },
-      { merge: true },
-    );
-    setGreetingInput("");
+    try {
+      await setDoc(
+        doc(db, "couples", coupleId, "dashboard", "main"),
+        { greetings: { [user.uid]: { text: greetingInput.trim(), updatedAt: Date.now() } } },
+        { merge: true },
+      );
+      setGreetingInput("");
+      toast("Greeting sent 💕", { kind: "success" });
+    } catch (err) {
+      toast("Couldn't send greeting", { kind: "error", body: errorMessage(err) });
+    }
   };
 
   const handlePapUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
     if (!file || !coupleId || !user) return;
 
     setIsUploadingPap(true);
     try {
-      const storageRef = ref(storage, `couples/${coupleId}/pap_${Date.now()}`);
-      await uploadBytes(storageRef, file);
+      const blob = await compressImage(file);
+      const storageRef = ref(storage, `couples/${coupleId}/pap_${user.uid}_${Date.now()}.jpg`);
+      await uploadBytes(storageRef, blob, { contentType: blob.type || "image/jpeg" });
       const url = await getDownloadURL(storageRef);
 
       await setDoc(
@@ -107,20 +90,24 @@ export default function HomePage() {
         },
         { merge: true },
       );
+      setActivePapUid(null);
     } catch (error) {
       console.error("Error uploading PAP:", error);
+      toast("Upload failed", { kind: "error", body: errorMessage(error) });
     } finally {
       setIsUploadingPap(false);
     }
   };
 
-  const today = startOfDay(new Date());
+  const now = new Date();
+  const today = startOfDay(now);
   const todayMs = today.getTime();
+  const todayStr = toDateStr(today);
 
   // Greetings logic
   const userGreeting = dashboard?.greetings?.[user?.uid || ""];
   const partnerGreetingEntry = Object.entries(dashboard?.greetings || {}).find(
-    ([uid, g]: [string, any]) => uid !== user?.uid && g.updatedAt >= todayMs
+    ([uid, g]) => uid !== user?.uid && g.updatedAt >= todayMs
   );
   const partnerGreeting = partnerGreetingEntry ? partnerGreetingEntry[1].text : null;
   const isUserGreetingToday = (userGreeting?.updatedAt || 0) >= todayMs;
@@ -129,7 +116,7 @@ export default function HomePage() {
   // PAP logic
   const userPap = dashboard?.paps?.[user?.uid || ""];
   const partnerPapEntry = Object.entries(dashboard?.paps || {}).find(
-    ([uid, p]: [string, any]) => uid !== user?.uid && p.updatedAt >= todayMs
+    ([uid, p]) => uid !== user?.uid && p.updatedAt >= todayMs
   );
   const partnerUid = partnerPapEntry?.[0] || "partner";
   const partnerPapUrl = partnerPapEntry ? partnerPapEntry[1].url : null;
@@ -139,29 +126,15 @@ export default function HomePage() {
   
   const displayActiveUid = activePapUid || (partnerPapUrl ? partnerUid : (userPapUrl ? user?.uid : null));
 
-  // Filter future events
-  // Filter future events
-  const upcomingEvents = events
-    .filter((e) => {
-      const eventDate = parseISO(e.dateStr);
-      return (
-        isAfter(eventDate, today) || eventDate.getTime() === today.getTime()
-      );
-    })
-    .sort((a, b) => {
-      if (a.dateStr === b.dateStr)
-        return a.startTime.localeCompare(b.startTime);
-      return a.dateStr.localeCompare(b.dateStr);
-    })
+  // Next three events from now on (today's events that already ended are skipped).
+  const nowTime = format(now, "HH:mm");
+  const upcomingEvents = expandRecurringEvents(events, todayStr, toDateStr(addDays(today, 60)))
+    .filter((e) => e.dateStr > todayStr || e.allDay || e.endTime > nowTime)
     .slice(0, 3);
 
   // Recent notes
   const recentNotes = [...notes]
-    .sort(
-      (a, b) =>
-        ((b.createdAt as any)?.toMillis?.() || 0) -
-        ((a.createdAt as any)?.toMillis?.() || 0),
-    )
+    .sort((a, b) => createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt))
     .slice(0, 2);
 
   return (
@@ -170,7 +143,8 @@ export default function HomePage() {
         {/* Header & Greeting */}
         <div className="space-y-4">
           <h1 className="text-3xl font-bold">
-            Good morning, {user?.displayName?.split(" ")[0]}! ✨
+            {timeOfDayGreeting(now)}
+            {userName ? `, ${userName.split(" ")[0]}` : ""}! ✨
           </h1>
 
           {partnerGreeting && (
@@ -180,7 +154,7 @@ export default function HomePage() {
                 &quot;{partnerGreeting}&quot;
               </p>
               <p className="text-sm text-pink-700 mt-2 relative z-10 font-medium">
-                — From your partner 💖
+                — From {partnerName || "your partner"} 💖
               </p>
             </div>
           )}
@@ -305,7 +279,7 @@ export default function HomePage() {
 
             {isUploadingPap && (
               <div className="mt-4 flex items-center justify-center gap-2 text-sm text-slate-500">
-                <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                <Spinner className="!w-4 !h-4 !border-2" />
                 Uploading...
               </div>
             )}
@@ -324,8 +298,8 @@ export default function HomePage() {
             <div className="flex-1 space-y-3">
               {upcomingEvents.length > 0 ? (
                 upcomingEvents.map((event) => {
-                  const eventDate = parseISO(event.dateStr);
-                  const isToday = eventDate.getTime() === today.getTime();
+                  const eventDate = toDate(event.dateStr);
+                  const isToday = event.dateStr === todayStr;
                   return (
                     <div
                       key={event.id}
@@ -345,7 +319,7 @@ export default function HomePage() {
                         </h4>
                         <p className="text-sm text-slate-500 truncate">
                           {isToday ? "Today" : format(eventDate, "EEEE")} •{" "}
-                          {event.startTime}
+                          {event.allDay ? "All day" : event.startTime}
                         </p>
                       </div>
                     </div>
@@ -370,8 +344,7 @@ export default function HomePage() {
             <div className="flex-1 grid grid-cols-2 gap-4">
               {recentNotes.length > 0 ? (
                 recentNotes.map((note) => {
-                  const colorTheme =
-                    COLORS.find((c) => c.id === note.color) || COLORS[0];
+                  const colorTheme = noteColor(note.color);
                   return (
                     <div
                       key={note.id}

@@ -3,48 +3,19 @@
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useCoupleData, StickyNote } from "@/context/CoupleDataContext";
-import { doc, setDoc, deleteDoc, updateDoc } from "firebase/firestore";
+import { collection, doc, setDoc, deleteDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, PanInfo } from "framer-motion";
 import { Plus, X, Check, Trash2 } from "lucide-react";
-import { v4 as uuidv4 } from "uuid";
-
-const COLORS = [
-  {
-    id: "yellow",
-    bg: "bg-[#fef08a]",
-    border: "border-[#fde047]",
-    text: "text-amber-900",
-  },
-  {
-    id: "pink",
-    bg: "bg-[#fbcfe8]",
-    border: "border-[#f9a8d4]",
-    text: "text-pink-900",
-  },
-  {
-    id: "blue",
-    bg: "bg-[#bfdbfe]",
-    border: "border-[#93c5fd]",
-    text: "text-blue-900",
-  },
-  {
-    id: "green",
-    bg: "bg-[#bbf7d0]",
-    border: "border-[#86efac]",
-    text: "text-green-900",
-  },
-  {
-    id: "purple",
-    bg: "bg-[#e9d5ff]",
-    border: "border-[#d8b4fe]",
-    text: "text-purple-900",
-  },
-];
+import { NOTE_COLORS as COLORS, noteColor } from "@/lib/noteColors";
+import { useToast } from "@/context/ToastContext";
+import { errorMessage } from "@/lib/errors";
+import { Spinner } from "@/components/Spinner";
 
 export default function NotesPage() {
   const { user, coupleId, userName, partnerName } = useAuth();
   const { notes, isLoading } = useCoupleData();
+  const { toast } = useToast();
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [newText, setNewText] = useState("");
@@ -74,29 +45,28 @@ export default function NotesPage() {
 
     setIsSaving(true);
     try {
-      const noteId = uuidv4();
+      const noteRef = doc(collection(db, "couples", coupleId, "notes"));
 
       // Random position roughly in the center
       const centerX = window.innerWidth / 2 - 100 + (Math.random() * 40 - 20);
       const centerY = window.innerHeight / 2 - 100 + (Math.random() * 40 - 20);
 
-      const newNote: StickyNote = {
-        id: noteId,
-        text: newText,
+      const newNote: Omit<StickyNote, "id"> = {
+        text: newText.trim(),
         color: selectedColor,
         x: Math.max(20, centerX),
         y: Math.max(100, centerY),
         createdBy: user.uid,
-        createdAt: new Date().toISOString(),
+        createdAt: serverTimestamp(),
       };
 
-      await setDoc(doc(db, "couples", coupleId, "notes", noteId), newNote);
+      await setDoc(noteRef, newNote);
 
       setNewText("");
       setIsAddOpen(false);
     } catch (err) {
       console.error(err);
-      alert("Failed to add note.");
+      toast("Failed to add note", { kind: "error", body: errorMessage(err) });
     } finally {
       setIsSaving(false);
     }
@@ -108,10 +78,11 @@ export default function NotesPage() {
       await deleteDoc(doc(db, "couples", coupleId, "notes", id));
     } catch (err) {
       console.error(err);
+      toast("Couldn't delete note", { kind: "error", body: errorMessage(err) });
     }
   };
 
-  const handleDragEnd = async (id: string, info: any) => {
+  const handleDragEnd = async (id: string, info: PanInfo) => {
     if (!coupleId) return;
     try {
       const note = notes.find((n) => n.id === id);
@@ -134,8 +105,8 @@ export default function NotesPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-[100dvh] flex items-center justify-center">
-        Loading...
+      <div className="h-full flex items-center justify-center">
+        <Spinner />
       </div>
     );
   }
@@ -159,8 +130,7 @@ export default function NotesPage() {
       <div className="absolute inset-0 z-0">
         <AnimatePresence>
           {notes.map((note) => {
-            const colorTheme =
-              COLORS.find((c) => c.id === note.color) || COLORS[0];
+            const colorTheme = noteColor(note.color);
             const isMine = note.createdBy === user?.uid;
 
             const safeX = Math.max(
@@ -203,6 +173,8 @@ export default function NotesPage() {
                   {isMine && (
                     <button
                       onClick={() => handleDelete(note.id)}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      aria-label="Delete note"
                       className={`p-1.5 rounded-full hover:bg-black/5 transition-colors ${colorTheme.text}`}
                     >
                       <Trash2 size={14} />
@@ -225,6 +197,7 @@ export default function NotesPage() {
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
         onClick={() => setIsAddOpen(true)}
+        aria-label="Add note"
         className="absolute bottom-28 right-6 w-14 h-14 bg-primary text-primary-foreground rounded-full shadow-lg flex items-center justify-center z-20"
       >
         <Plus size={28} />
@@ -250,6 +223,7 @@ export default function NotesPage() {
             >
               <button
                 onClick={() => setIsAddOpen(false)}
+                aria-label="Close"
                 className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 bg-gray-50 rounded-full p-2"
               >
                 <X size={20} />
@@ -278,6 +252,8 @@ export default function NotesPage() {
                         key={c.id}
                         type="button"
                         onClick={() => setSelectedColor(c.id)}
+                        aria-label={`${c.id} note`}
+                        aria-pressed={selectedColor === c.id}
                         className={`w-10 h-10 rounded-full ${c.bg} border-2 transition-all flex items-center justify-center ${selectedColor === c.id ? c.border + " scale-110 shadow-md" : "border-transparent hover:scale-105"}`}
                       >
                         {selectedColor === c.id && (

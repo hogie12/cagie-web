@@ -1,7 +1,8 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
+import { connectAuthEmulator, getAuth } from "firebase/auth";
+import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
+import { connectFunctionsEmulator, getFunctions } from "firebase/functions";
+import { connectStorageEmulator, getStorage } from "firebase/storage";
 import { getMessaging, isSupported } from "firebase/messaging";
 
 const firebaseConfig = {
@@ -11,20 +12,33 @@ const firebaseConfig = {
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
+const FUNCTIONS_REGION = "asia-southeast2";
+
 // Initialize Firebase only if there are no existing apps (prevents Next.js hot-reload issues)
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+const isFirstInit = getApps().length === 0;
+const app = isFirstInit ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
+const functions = getFunctions(app, FUNCTIONS_REGION);
+
+// Local development against `firebase emulators:start`.
+if (isFirstInit && process.env.NEXT_PUBLIC_USE_EMULATORS === "true") {
+  const host = process.env.NEXT_PUBLIC_EMULATOR_HOST || "127.0.0.1";
+  connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+  connectFirestoreEmulator(db, host, 8080);
+  connectStorageEmulator(storage, host, 9199);
+  connectFunctionsEmulator(functions, host, 5001);
+}
 
 export const initializeMessaging = async () => {
-  if (typeof window !== "undefined" && await isSupported()) {
+  if (typeof window !== "undefined" && (await isSupported())) {
     return getMessaging(app);
   }
   return null;
 };
 
-export { app, auth, db, storage };
+export { app, auth, db, storage, functions };

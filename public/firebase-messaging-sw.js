@@ -1,52 +1,23 @@
-// Give the service worker access to Firebase Messaging.
-// Note that you can only use Firebase Messaging here. Other Firebase libraries
-// are not available in the service worker.
-importScripts(
-  "https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js",
-);
-importScripts(
-  "https://www.gstatic.com/firebasejs/10.8.1/firebase-messaging-compat.js",
-);
+// Firebase Cloud Messaging service worker.
+//
+// Messages from the `onDashboardUpdate` Cloud Function carry a `notification`
+// payload, which the Messaging SDK displays by itself when the app is in the
+// background, and opens `webpush.fcmOptions.link` when tapped. Do NOT call
+// showNotification() in onBackgroundMessage as well, or users get duplicates.
+// Foreground messages are shown as an in-app toast (see src/app/(app)/layout.tsx).
+//
+// Keep the SDK version in sync with the `firebase` package in package.json.
+importScripts("https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js");
+importScripts("https://www.gstatic.com/firebasejs/12.15.0/firebase-messaging-compat.js");
 
-// Initialize the Firebase app in the service worker by passing in
-// your app's Firebase config object.
-// You need to replace this with your actual Firebase config but since the service worker doesn't have process.env,
-// you can pass url params when registering or hardcode for now.
-// A common approach is using firebase.initializeApp(firebaseConfig) with hardcoded values,
-// OR fetching them via a fetch call. We'll leave it as a placeholder to be configured by the user.
-
-const firebaseConfig = {
-  // Replace these with the actual values from .env.local
-  // This is required for background notifications to work on Android/Web
+// These values are public (they ship in the web bundle too). A service worker
+// can't read process.env, so they are inlined here.
+firebase.initializeApp({
   apiKey: "AIzaSyCqYGGdeplZ5FDCs5UdPc1zn93PRWy7a2w",
   authDomain: "cagie-web.firebaseapp.com",
   projectId: "cagie-web",
-  storageBucket: "cagie-web",
   messagingSenderId: "1021759447136",
   appId: "1:1021759447136:web:abdc6f3b4961cb4372a305",
-  measurementId: "G-PM4PTSJG85",
-};
+});
 
-// Only initialize if we have the config
-if (firebaseConfig.apiKey !== "YOUR_API_KEY") {
-  firebase.initializeApp(firebaseConfig);
-
-  // Retrieve an instance of Firebase Messaging so that it can handle background
-  // messages.
-  const messaging = firebase.messaging();
-
-  messaging.onBackgroundMessage((payload) => {
-    console.log(
-      "[firebase-messaging-sw.js] Received background message ",
-      payload,
-    );
-    // Customize notification here
-    const notificationTitle = payload.notification.title;
-    const notificationOptions = {
-      body: payload.notification.body,
-      icon: payload.notification.icon || "/apple-icon.png",
-    };
-
-    self.registration.showNotification(notificationTitle, notificationOptions);
-  });
-}
+firebase.messaging();
