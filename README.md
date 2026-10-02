@@ -1,36 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Cagie 💕
 
-## Getting Started
+A shared planner for couples: a calendar with "me / partner / us" lanes, a sticky-notes wall,
+a daily photo and greeting, and push notifications. Next.js 16 (App Router, client-side) +
+Firebase (Auth, Firestore, Storage, Cloud Functions, Cloud Messaging).
 
-First, run the development server:
+## Getting started
 
 ```bash
+npm install
+npm --prefix functions install
+cp .env.example .env.local   # fill in your Firebase web config
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Local development with the emulators
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+No production data needed. Install the [Firebase CLI](https://firebase.google.com/docs/cli)
+(Java 21 is required for the Firestore emulator), then:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run emulators          # builds functions, starts auth/firestore/storage/functions
+```
 
-## Learn More
+and in `.env.local` use the demo values at the bottom of `.env.example`
+(`NEXT_PUBLIC_USE_EMULATORS=true`, project `demo-cagie`). Sign up two accounts in two browser
+profiles and pair them with the invite code.
 
-To learn more about Next.js, take a look at the following resources:
+## Scripts
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Next.js dev server |
+| `npm run build` | Production build |
+| `npm run lint` / `npm run typecheck` | ESLint / TypeScript |
+| `npm test` | Unit tests (recurrence, clash detection, timeline layout) |
+| `npm run test:rules` | Firestore + Storage security-rules tests in the emulators |
+| `npm run emulators` | Local Firebase emulators |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+CI (`.github/workflows/ci.yml`) runs all of the above on every PR.
 
-## Deploy on Vercel
+## Project layout
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+src/
+  app/(auth)/        login, pair
+  app/(app)/         signed-in + paired pages (layout guards the route)
+    calendar/        Day / Month / Agenda views, event form & detail sheets
+  context/           AuthContext (live profile + partner), CoupleDataContext (live couple data), toasts
+  lib/recurrence.ts  repeating-event expansion, clash detection, day layout (unit tested)
+functions/src/       pairing (getInviteCode / pairWithCode) and push notifications
+firestore.rules      data access rules (tested in tests/rules)
+storage.rules        photo upload rules
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Data model (Firestore)
+
+- `users/{uid}`: `name`, `photoURL`, `coupleId` (set only by Cloud Functions), `fcmTokens`
+- `couples/{id}`: `members: [uid, uid]` (created only by `pairWithCode`)
+  - `events/{id}`: `title`, `dateStr`, `startTime`, `endTime`, `allDay`, `ownerId` (uid or `"us"`),
+    optional `repeatType` (`daily|weekly|monthly|yearly`), `repeatDays`, `repeatUntil`, and
+    per-date `exceptions`
+  - `notes/{id}`, `dashboard/main` (greetings + daily photos), `history/{id}` (written by functions)
+- `inviteCodes/{code}`: private to functions, expire after 7 days
+
+## Deploying
+
+Rules, storage rules and functions must go out together. The client no longer writes
+pairing data, so old rules + new client (or the reverse) breaks pairing:
+
+```bash
+firebase deploy --only firestore:rules,storage,functions
+```
+
+The first Storage-rules deploy asks to let Storage read Firestore (needed for the
+couple-membership check). Accept it. Apply `cors.json` to the bucket with
+`gsutil cors set cors.json gs://<bucket>` if the web origin changes.
