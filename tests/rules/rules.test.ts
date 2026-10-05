@@ -123,6 +123,33 @@ describe("dashboard", () => {
     await assertFails(setDoc(main("alice"), { other: true }, { merge: true }));
     await assertFails(setDoc(main("eve"), { greetings: { eve: { text: "x", updatedAt: 1 } } }, { merge: true }));
   });
+
+  it("still accepts own entries when an older app left extra fields on the doc", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), `couples/${COUPLE}/dashboard/main`), {
+        greetings: { bob: { text: "hey", updatedAt: 1 } },
+        lastUpdated: 123,
+      });
+    });
+    await assertSucceeds(
+      setDoc(main("alice"), { greetings: { alice: { text: "hi", updatedAt: 2 } } }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(main("alice"), { paps: { alice: { url: "u", updatedAt: 2 } } }, { merge: true }),
+    );
+    await assertFails(setDoc(main("alice"), { lastUpdated: 999 }, { merge: true }));
+    await assertFails(
+      setDoc(main("alice"), { greetings: { bob: { text: "fake", updatedAt: 3 } } }, { merge: true }),
+    );
+  });
+
+  it("only allows a fresh doc with greetings / paps", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await deleteDoc(doc(ctx.firestore(), `couples/${COUPLE}/dashboard/main`));
+    });
+    await assertFails(setDoc(main("alice"), { greetings: { alice: { text: "hi", updatedAt: 1 } }, extra: 1 }));
+    await assertSucceeds(setDoc(main("alice"), { greetings: { alice: { text: "hi", updatedAt: 1 } } }));
+  });
 });
 
 describe("private collections", () => {
