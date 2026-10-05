@@ -75,10 +75,16 @@ service cloud.firestore {
       match /dashboard/{docId} {
         allow read: if isMember(coupleId);
         // Each partner may only write their own greeting / photo entry.
-        allow create, update: if isMember(coupleId)
-                              && request.resource.data.keys().hasOnly(['greetings', 'paps'])
-                              && onlyOwnEntry('greetings')
-                              && onlyOwnEntry('paps');
+        allow create: if isMember(coupleId)
+                      && request.resource.data.keys().hasOnly(['greetings', 'paps'])
+                      && onlyOwnEntry('greetings')
+                      && onlyOwnEntry('paps');
+        // Older app versions left other fields on this doc: keep them, but only
+        // `greetings` / `paps` may change.
+        allow update: if isMember(coupleId)
+                      && onlyChanged(['greetings', 'paps'])
+                      && onlyOwnEntry('greetings')
+                      && onlyOwnEntry('paps');
         allow delete: if false;
       }
 
