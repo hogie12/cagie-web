@@ -65,6 +65,10 @@ storage.rules        photo upload rules
 
 ## Deploying
 
+The website is hosted on Vercel at `https://cagie-web.vercel.app` (deployed on push to `main`).
+Push notifications link there; override with the `APP_URL` environment variable on the
+functions if the domain changes.
+
 Rules, storage rules and functions must go out together. The client no longer writes
 pairing data, so old rules + new client (or the reverse) breaks pairing:
 

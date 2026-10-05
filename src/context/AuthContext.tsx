@@ -92,6 +92,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => onAuthStateChanged(auth, (u) => setAuthState({ user: u, ready: true })), []);
 
+  // Ask the browser not to evict this site's storage (where the login lives).
+  // Phones may otherwise clear it after some days; installed apps are usually granted this.
+  useEffect(() => {
+    if (!uid || typeof navigator === "undefined" || !navigator.storage?.persist) return;
+    navigator.storage.persisted()
+      .then((already) => (already ? true : navigator.storage.persist()))
+      .catch(() => {});
+  }, [uid]);
+
   // Live profile: name / photo / coupleId changes show up everywhere immediately.
   useEffect(() => {
     if (!user) return;

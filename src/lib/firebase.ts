@@ -1,5 +1,12 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { connectAuthEmulator, getAuth } from "firebase/auth";
+import {
+  Auth,
+  browserLocalPersistence,
+  connectAuthEmulator,
+  getAuth,
+  indexedDBLocalPersistence,
+  initializeAuth,
+} from "firebase/auth";
 import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
 import { connectFunctionsEmulator, getFunctions } from "firebase/functions";
 import { connectStorageEmulator, getStorage } from "firebase/storage";
@@ -17,10 +24,27 @@ const firebaseConfig = {
 
 const FUNCTIONS_REGION = "asia-southeast2";
 
+/**
+ * Keep the login on the device until the user logs out. IndexedDB is the
+ * primary store; localStorage is a fallback for browsers or home-screen apps
+ * where IndexedDB is unavailable or gets cleared on its own.
+ */
+function createAuth(): Auth {
+  if (typeof window === "undefined" || !isFirstInit) return getAuth(app);
+  try {
+    return initializeAuth(app, {
+      persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+    });
+  } catch {
+    // Already initialized (e.g. hot reload).
+    return getAuth(app);
+  }
+}
+
 // Initialize Firebase only if there are no existing apps (prevents Next.js hot-reload issues)
 const isFirstInit = getApps().length === 0;
 const app = isFirstInit ? initializeApp(firebaseConfig) : getApp();
-const auth = getAuth(app);
+const auth = createAuth();
 const db = getFirestore(app);
 const storage = getStorage(app);
 const functions = getFunctions(app, FUNCTIONS_REGION);
