@@ -2,7 +2,7 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 
-const APP_URL = process.env.APP_URL || "https://cagie-web.web.app";
+const APP_URL = process.env.APP_URL || "https://cagie-web.vercel.app";
 
 interface Entry {
   updatedAt: number;

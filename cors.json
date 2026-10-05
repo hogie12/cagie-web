@@ -1,12 +1,18 @@
 [
   {
     "origin": [
+      "https://cagie-web.vercel.app",
       "https://cagie-web.web.app",
       "https://cagie-web.firebaseapp.com",
       "http://localhost:3000"
     ],
-    "method": ["GET", "HEAD"],
+    "method": [
+      "GET",
+      "HEAD"
+    ],
     "maxAgeSeconds": 3600,
-    "responseHeader": ["Content-Type"]
+    "responseHeader": [
+      "Content-Type"
+    ]
   }
 ]
