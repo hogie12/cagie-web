@@ -40,7 +40,7 @@ function fakeRepo() {
     async commit(_c, change, entry) {
       s.commits++;
       if (s.failCommit) throw new Error("boom");
-      let id = "id" in change ? change.id : `n${s.nextId++}`;
+      const id = "id" in change ? change.id : `n${s.nextId++}`;
       if (change.kind === "create" || change.kind === "set") s.events.set(id, { ...change.data, id } as StoredEvent);
       else s.events.delete(id);
       s.writes++;
