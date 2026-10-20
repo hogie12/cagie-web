@@ -79,3 +79,31 @@ firebase deploy --only firestore:rules,storage,functions
 The first Storage-rules deploy asks to let Storage read Firestore (needed for the
 couple-membership check). Accept it. Apply `cors.json` to the bucket with
 `gsutil cors set cors.json gs://<bucket>` if the web origin changes.
+
+## WhatsApp assistant
+
+The [wa-agent](https://github.com/hogie12/wa-agent) WhatsApp bot can show and change a user's own and shared ("us")
+events, never the partner's. Users connect on the Profile page ("WhatsApp assistant"): the app shows a one-time code
+(valid 10 minutes) to send as `/link CODE` to the assistant. Every change made through WhatsApp needs an explicit YES and
+is logged in `couples/{id}/botAudit`.
+
+Pieces:
+
+- `functions/src/scheduleApi.ts`: HTTP API for the bot (bearer token), logic in `scheduleHandler.ts` / `scheduleCore.ts`.
+- `functions/src/whatsappLink.ts`: `getWhatsAppLinkCode` / `unlinkWhatsApp` callables.
+- `functions/src/recurrence.ts` is a copy of `src/lib/recurrence.ts`; keep them in sync.
+- Firestore: `waLinkCodes`, `waLinks` (numbers stored only as salted hashes), `waLinkAttempts`, `couples/{id}/botAudit`;
+  all closed to clients.
+
+Setup (once):
+
+```bash
+openssl rand -hex 32 | firebase functions:secrets:set SCHEDULE_TOKEN --data-file=-
+openssl rand -hex 32 | firebase functions:secrets:set LINK_SALT --data-file=-
+firebase deploy --only firestore:rules,functions
+```
+
+Then set `NEXT_PUBLIC_WA_ASSISTANT_NUMBER` (the assistant's number, e.g. `6281234567890`) in Vercel and redeploy, and
+give the bot the `scheduleApi` URL and the same `SCHEDULE_TOKEN` (read it with
+`firebase functions:secrets:access SCHEDULE_TOKEN`). Deploy rules and functions before the UI.
+
