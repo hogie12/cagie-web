@@ -3,11 +3,16 @@
 import { createHash, timingSafeEqual } from "crypto";
 import { codeUsable, failedAttemptsAllowed, hashJid, normalizeCode } from "./linkCore";
 import {
-  EventInput, StoredEvent, buildUpdated, canModify, listForActor, toStored, todayIn, validateInput, validRange,
-  withSkippedOccurrence,
+  EventInput, StoredEvent, buildUpdated, canModify, hasForeignOccurrences, listForActor, normalizeStored, occurrenceOn,
+  toStored, todayIn, validateInput, validRange, withSkippedOccurrence,
 } from "./scheduleCore";
 
 type NewEvent = Omit<StoredEvent, "id">;
+
+export type EventChange =
+  | { kind: "create"; data: NewEvent }
+  | { kind: "set"; id: string; data: NewEvent }
+  | { kind: "delete"; id: string };
 
 export interface ScheduleRepo {
   findLink(hash: string): Promise<{ uid: string; coupleId: string } | null>;
@@ -20,11 +25,11 @@ export interface ScheduleRepo {
   getUserNames(uid: string, coupleId: string): Promise<{ name: string; partnerName: string | null }>;
   listEvents(coupleId: string): Promise<StoredEvent[]>;
   getEvent(coupleId: string, id: string): Promise<StoredEvent | null>;
-  createEvent(coupleId: string, data: NewEvent): Promise<string>;
-  /** Replaces the whole document. */
-  updateEvent(coupleId: string, id: string, data: NewEvent): Promise<void>;
-  deleteEvent(coupleId: string, id: string): Promise<void>;
-  audit(coupleId: string, entry: Record<string, unknown>): Promise<void>;
+  /**
+   * Writes the event change and its audit entry atomically; returns the event id.
+   * "set" replaces the whole document. The repo adds `eventId` to the audit entry.
+   */
+  commit(coupleId: string, change: EventChange, audit: Record<string, unknown>): Promise<string>;
 }
 
 export interface HttpReq {
@@ -76,9 +81,8 @@ function withoutId(e: StoredEvent): NewEvent {
 }
 
 export function createScheduleHandler({ repo, token, salt, tz, now }: Deps) {
-  async function audit(coupleId: string, uid: string, action: string, eventId: string, before: unknown, after: unknown) {
-    await repo.audit(coupleId, { ts: now().getTime(), uid, action, eventId, before, after, via: "wa-agent" });
-  }
+  const entry = (uid: string, action: string, before: unknown, after: unknown) =>
+    ({ ts: now().getTime(), uid, action, before, after, via: "wa-agent" });
 
   async function link(body: unknown): Promise<HttpRes> {
     const b = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
@@ -138,8 +142,7 @@ export function createScheduleHandler({ repo, token, salt, tz, now }: Deps) {
         const checked = validateInput(pickInput(req.body), today, "create");
         if (!checked.ok) return bad(checked.error);
         const data = toStored(checked.value, uid);
-        const id = await repo.createEvent(coupleId, data);
-        await audit(coupleId, uid, "create", id, null, data);
+        const id = await repo.commit(coupleId, { kind: "create", data }, entry(uid, "create", null, data));
         return json(200, { id });
       }
       return json(405, { error: "method_not_allowed" });
@@ -148,31 +151,40 @@ export function createScheduleHandler({ repo, token, salt, tz, now }: Deps) {
     // /events/:id
     const id = decodeURIComponent(eventMatch![1]);
     if (method !== "PATCH" && method !== "DELETE") return json(405, { error: "method_not_allowed" });
-    const current = await repo.getEvent(coupleId, id);
-    if (!current) return json(404, { error: "not_found" });
+    const stored = await repo.getEvent(coupleId, id);
+    if (!stored) return json(404, { error: "not_found" });
+    const current = normalizeStored(stored);
     if (!canModify(current, uid)) return json(403, { error: "forbidden" });
+    const repeating = !!current.repeatType && current.repeatType !== "none";
+
+    const occurrence = req.query.occurrence;
+    if (method === "DELETE" && occurrence) {
+      if (!repeating) return bad("not a repeating event");
+      if (!validRange(occurrence, occurrence)) return bad("occurrence must be YYYY-MM-DD");
+      const day = occurrenceOn(current, occurrence, uid);
+      if (day === "none") return bad("no occurrence on that date");
+      if (day === "foreign") return json(403, { error: "forbidden" });
+      const after = { ...withoutId(stored), ...withSkippedOccurrence(stored, occurrence) };
+      await repo.commit(coupleId, { kind: "set", id, data: after }, entry(uid, "skip", withoutId(stored), after));
+      return json(200, { ok: true });
+    }
+
+    // Whole event or series from here on: never touch days handed to the partner.
+    if (repeating && hasForeignOccurrences(current, uid)) return json(409, { error: "has_partner_occurrences" });
 
     if (method === "PATCH") {
       const input = validateInput(pickInput(req.body), today, "update");
       if (!input.ok) return bad(input.error);
+      if (repeating && input.value.date !== undefined && input.value.date !== current.dateStr) {
+        return bad("move_series_not_supported");
+      }
       const updated = buildUpdated(current, input.value, uid, today);
       if (!updated.ok) return bad(updated.error);
-      await repo.updateEvent(coupleId, id, updated.value);
-      await audit(coupleId, uid, "update", id, withoutId(current), updated.value);
+      await repo.commit(coupleId, { kind: "set", id, data: updated.value }, entry(uid, "update", withoutId(stored), updated.value));
       return json(200, { ok: true });
     }
 
-    const occurrence = req.query.occurrence;
-    if (occurrence) {
-      if (!current.repeatType || current.repeatType === "none") return bad("not a repeating event");
-      if (!validRange(occurrence, occurrence)) return bad("occurrence must be YYYY-MM-DD");
-      const after = { ...withoutId(current), ...withSkippedOccurrence(current, occurrence) };
-      await repo.updateEvent(coupleId, id, after);
-      await audit(coupleId, uid, "skip", id, withoutId(current), after);
-      return json(200, { ok: true });
-    }
-    await repo.deleteEvent(coupleId, id);
-    await audit(coupleId, uid, "delete", id, withoutId(current), null);
+    await repo.commit(coupleId, { kind: "delete", id }, entry(uid, "delete", withoutId(stored), null));
     return json(200, { ok: true });
   }
 

@@ -1,7 +1,9 @@
 // Pure schedule logic for the WhatsApp assistant API (no Firebase imports, unit tested).
 // Stored fields mirror src/app/(app)/calendar/eventActions.ts so events look normal in the app.
 import { addYears, format, isValid, parse } from "date-fns";
-import { CalendarEvent, EventException, RepeatType, expandRecurringEvents } from "./recurrence";
+import {
+  CalendarEvent, EventException, RepeatType, expandRecurringEvents, minutesToTime, timeToMinutes,
+} from "./recurrence";
 
 export type StoredEvent = CalendarEvent & { id: string };
 
@@ -59,13 +61,39 @@ export function validRange(from: string, to: string): boolean {
 
 const ownedBy = (ownerId: string | null | undefined, actorUid: string) => ownerId === actorUid || ownerId === "us";
 
+/**
+ * Older events may lack times or ownerId; read them the way the app does (CoupleDataContext.toCalendarEvent):
+ * start defaults to 12:00, end comes from durationMinutes or start + 60 min, and no owner at all means shared.
+ * A legacy event with only a writer-relative `owner` ("me"/"partner") has no knowable owner and stays untouchable.
+ */
+export function normalizeStored(e: StoredEvent): StoredEvent {
+  const raw = e as StoredEvent & { durationMinutes?: number };
+  const startTime = e.startTime || "12:00";
+  const endTime = e.endTime ||
+    minutesToTime(timeToMinutes(startTime) + (raw.durationMinutes ? raw.durationMinutes : 60));
+  const ownerId = e.ownerId || (!e.owner || e.owner === "us" ? "us" : null);
+  return { ...e, startTime, endTime, ownerId };
+}
+
+/** True when some exception hands a day of this series to someone other than the actor (or "us"). */
+export function hasForeignOccurrences(e: StoredEvent, actorUid: string): boolean {
+  return Object.values(e.exceptions ?? {}).some((x) => !x.deleted && x.ownerId !== undefined && !ownedBy(x.ownerId, actorUid));
+}
+
+/** Whether the series has an occurrence on `date`, and whose it is. */
+export function occurrenceOn(e: StoredEvent, date: string, actorUid: string): "owned" | "foreign" | "none" {
+  const [occ] = expandRecurringEvents([e], date, date);
+  if (!occ) return "none";
+  return ownedBy(occ.ownerId, actorUid) ? "owned" : "foreign";
+}
+
 export function canModify(event: StoredEvent, actorUid: string): boolean {
   return ownedBy(event.ownerId, actorUid);
 }
 
 /** Events and occurrences in [from, to] that belong to the actor or are shared. Never returns descriptions. */
 export function listForActor(events: StoredEvent[], actorUid: string, from: string, to: string): ApiEvent[] {
-  return expandRecurringEvents(events, from, to)
+  return expandRecurringEvents(events.map(normalizeStored), from, to)
     .filter((e) => ownedBy(e.ownerId, actorUid))
     .map((e) => ({
       id: e.originalEventId ?? e.id,
