@@ -95,6 +95,9 @@ Pieces:
 - Firestore: `waLinkCodes`, `waLinks` (numbers stored only as salted hashes), `waLinkAttempts`, `couples/{id}/botAudit`;
   all closed to clients.
 
+Tests: `npm test` (unit, includes the function logic), `npm run test:rules` and `npm run test:repo`
+(Firestore emulator; needs the Firebase CLI and Java 21+).
+
 Setup (once):
 
 ```bash
