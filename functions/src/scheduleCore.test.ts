@@ -30,15 +30,15 @@ describe("listForActor", () => {
   ];
   const out = listForActor(events, ME, "2026-10-19", "2026-11-09");
 
-  it("returns own and shared events only", () => {
+  it("returns own, shared and (read-only) partner events", () => {
     const ids = out.map((e) => `${e.id}${e.occurrence ? "@" + e.occurrence : ""}`);
     expect(ids).toContain("mine");
     expect(ids).toContain("ours");
-    expect(ids).not.toContain("theirs");
+    expect(out.find((e) => e.id === "theirs")?.owner).toBe("partner");
   });
-  it("expands repeats, skips deleted and partner-reassigned occurrences", () => {
-    const weekly = out.filter((e) => e.id === "weekly").map((e) => e.occurrence);
-    expect(weekly).toEqual(["2026-10-19", "2026-11-09"]);
+  it("expands repeats, skips deleted occurrences, marks reassigned ones as the partner's", () => {
+    const weekly = out.filter((e) => e.id === "weekly").map((e) => `${e.occurrence}:${e.owner}`);
+    expect(weekly).toEqual(["2026-10-19:us", "2026-11-02:partner", "2026-11-09:us"]);
   });
   it("never includes descriptions and maps owner", () => {
     expect(JSON.stringify(out)).not.toContain("secret");

@@ -123,7 +123,9 @@ describe("events", () => {
     const ids = (r.body as { events: { id: string }[] }).events.map((e) => e.id);
     expect(ids).toContain("mine");
     expect(ids).toContain("daily");
-    expect(ids).not.toContain("theirs");
+    const theirs = (r.body as { events: { id: string; owner: string; title: string }[] }).events.find((e) => e.id === "theirs");
+    expect(theirs).toMatchObject({ owner: "partner", title: "T" });
+    expect(JSON.stringify(r.body)).not.toContain('"description"');
     expect((await handle(req("GET", "/events", { query: { from: "2026-10-01", to: "2026-11-05" } }))).status).toBe(400);
   });
   it("creates with stored fields and one audit entry; ignores ownerId in the body", async () => {
