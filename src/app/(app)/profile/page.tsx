@@ -12,6 +12,7 @@ import { Camera, Save, Loader2, Edit2, LogOut, BellRing } from "lucide-react";
 import { compressImage } from "@/lib/image";
 import { errorMessage } from "@/lib/errors";
 import { Avatar } from "@/components/Avatar";
+import { WhatsAppLinkCard } from "./WhatsAppLinkCard";
 
 function initialNotificationStatus(): NotificationStatus {
   if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
@@ -293,6 +294,8 @@ export default function ProfilePage() {
             </button>
           )}
         </div>
+
+        <WhatsAppLinkCard />
 
         <button
           onClick={handleLogout}
