@@ -83,7 +83,7 @@ couple-membership check). Accept it. Apply `cors.json` to the bucket with
 ## WhatsApp assistant
 
 The [wa-agent](https://github.com/hogie12/wa-agent) WhatsApp bot can show and change a user's own and shared ("us")
-events, never the partner's. Users connect on the Profile page ("WhatsApp assistant"): the app shows a one-time code
+events. The partner's events are listed read-only (titles and times, no descriptions) and can never be changed through it. Users connect on the Profile page ("WhatsApp assistant"): the app shows a one-time code
 (valid 10 minutes) to send as `/link CODE` to the assistant. Every change made through WhatsApp needs an explicit YES and
 is logged in `couples/{id}/botAudit`.
 
