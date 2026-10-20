@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run src",
+    "test": "vitest run src functions/src",
     "test:rules": "firebase emulators:exec --only firestore,storage --project demo-cagie \"vitest run tests/rules\"",
     "emulators": "npm --prefix functions run build && firebase emulators:start --project demo-cagie"
   },
