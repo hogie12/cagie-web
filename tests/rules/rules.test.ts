@@ -177,3 +177,26 @@ describe("storage", () => {
     await assertFails(uploadBytes(ref(alice, "users/bob/avatar.jpg"), png, { contentType: "image/jpeg" }));
   });
 });
+
+describe("WhatsApp assistant data", () => {
+  it("keeps links, codes, attempts and the audit log private", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, "waLinkCodes/ABC234"), { uid: "alice", coupleId: COUPLE, expiresAt: 1 });
+      await setDoc(doc(db, "waLinks/h1"), { uid: "alice", coupleId: COUPLE });
+      await setDoc(doc(db, `couples/${COUPLE}/botAudit/a1`), { uid: "alice" });
+    });
+    await assertFails(getDoc(doc(as("alice"), "waLinkCodes/ABC234")));
+    await assertFails(setDoc(doc(as("alice"), "waLinkCodes/ZZZ999"), { uid: "alice" }));
+    await assertFails(getDoc(doc(as("alice"), "waLinks/h1")));
+    await assertFails(setDoc(doc(as("eve"), "waLinks/h2"), { uid: "eve", coupleId: COUPLE }));
+    await assertFails(setDoc(doc(as("alice"), "waLinkAttempts/h1"), { ts: [] }));
+    await assertFails(getDoc(doc(as("alice"), `couples/${COUPLE}/botAudit/a1`)));
+    await assertFails(setDoc(doc(as("alice"), `couples/${COUPLE}/botAudit/a2`), { uid: "alice" }));
+  });
+
+  it("does not let a user mark themselves as linked", async () => {
+    await assertFails(updateDoc(doc(as("alice"), "users/alice"), { whatsappLinkedAt: 1 }));
+  });
+});
+

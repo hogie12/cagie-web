@@ -92,10 +92,26 @@ service cloud.firestore {
         allow read: if isMember(coupleId);
         allow write: if false;
       }
+
+      // Written only by the WhatsApp assistant API (Cloud Functions).
+      match /botAudit/{entryId} {
+        allow read, write: if false;
+      }
     }
 
     // Invite codes are private to Cloud Functions.
     match /inviteCodes/{code} {
+      allow read, write: if false;
+    }
+
+    // WhatsApp assistant links, codes and attempt counters: Cloud Functions only.
+    match /waLinkCodes/{code} {
+      allow read, write: if false;
+    }
+    match /waLinks/{linkId} {
+      allow read, write: if false;
+    }
+    match /waLinkAttempts/{linkId} {
       allow read, write: if false;
     }
   }
