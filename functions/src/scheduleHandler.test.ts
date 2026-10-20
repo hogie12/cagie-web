@@ -19,6 +19,8 @@ function fakeRepo() {
     events: new Map<string, StoredEvent>(),
     audit: [] as Record<string, unknown>[],
     writes: 0,
+    commits: 0,
+    failCommit: false,
     nextId: 1,
   };
   const repo: ScheduleRepo = {
@@ -35,10 +37,16 @@ function fakeRepo() {
     async getUserNames(uid) { return uid === ME ? { name: "Hogie", partnerName: "Partner" } : { name: "?", partnerName: null }; },
     async listEvents() { return [...s.events.values()]; },
     async getEvent(_c, id) { return s.events.get(id) ?? null; },
-    async createEvent(_c, data) { const id = `n${s.nextId++}`; s.events.set(id, { ...data, id } as StoredEvent); s.writes++; return id; },
-    async updateEvent(_c, id, data) { s.events.set(id, { ...data, id } as StoredEvent); s.writes++; },
-    async deleteEvent(_c, id) { s.events.delete(id); s.writes++; },
-    async audit(_c, entry) { s.audit.push(entry); },
+    async commit(_c, change, entry) {
+      s.commits++;
+      if (s.failCommit) throw new Error("boom");
+      let id = "id" in change ? change.id : `n${s.nextId++}`;
+      if (change.kind === "create" || change.kind === "set") s.events.set(id, { ...change.data, id } as StoredEvent);
+      else s.events.delete(id);
+      s.writes++;
+      s.audit.push({ ...entry, eventId: id });
+      return id;
+    },
   };
   return { s, repo };
 }
@@ -157,3 +165,53 @@ describe("events", () => {
     expect((await handle(req("DELETE", "/events/ghost"))).status).toBe(404);
   });
 });
+
+describe("review fixes", () => {
+  beforeEach(linkMe);
+  const weeklyUs = (): StoredEvent => ({
+    ...base, id: "wk", owner: "us", ownerId: "us", dateStr: "2026-10-19", repeatType: "weekly", repeatDays: [1],
+    exceptions: { "2026-11-02": { ownerId: PARTNER, owner: "me" } },
+  });
+
+  it("skipping one day checks the owner of that day", async () => {
+    s.events.set("wk", weeklyUs());
+    expect((await handle(req("DELETE", "/events/wk", { query: { occurrence: "2026-11-02" } }))).status).toBe(403);
+    expect((await handle(req("DELETE", "/events/wk", { query: { occurrence: "2026-10-20" } }))).status).toBe(400); // not a Monday
+    expect((await handle(req("DELETE", "/events/wk", { query: { occurrence: "2026-10-26" } }))).status).toBe(200);
+  });
+
+  it("whole-series change or delete is refused when the partner owns some days", async () => {
+    s.events.set("wk", weeklyUs());
+    expect(await handle(req("PATCH", "/events/wk", { body: { title: "New" } }))).toEqual({ status: 409, body: { error: "has_partner_occurrences" } });
+    expect((await handle(req("DELETE", "/events/wk"))).status).toBe(409);
+    expect(s.writes).toBe(0);
+  });
+
+  it("moving a repeating event's date is refused", async () => {
+    expect(await handle(req("PATCH", "/events/daily", { body: { date: "2026-10-25" } }))).toEqual({
+      status: 400, body: { error: "move_series_not_supported" },
+    });
+  });
+
+  it("event write and audit happen in one commit; a failed commit changes nothing", async () => {
+    await handle(req("PATCH", "/events/mine", { body: { title: "X" } }));
+    expect(s.commits).toBe(1);
+    expect(s.audit).toHaveLength(1);
+    s.failCommit = true;
+    const r = await handle(req("DELETE", "/events/mine"));
+    expect(r.status).toBe(500);
+    expect(s.events.has("mine")).toBe(true);
+  });
+
+  it("older events without times or owner work like in the app", async () => {
+    const legacy = { title: "Old", description: "", dateStr: "2026-10-21" } as unknown as StoredEvent;
+    s.events.set("old1", { ...legacy, id: "old1", startTime: "09:00", durationMinutes: 30, ownerId: ME } as unknown as StoredEvent);
+    s.events.set("old2", { ...legacy, id: "old2" } as StoredEvent); // no owner at all: shared in the app
+    const r = await handle(req("GET", "/events", { query: { from: "2026-10-21", to: "2026-10-21" } }));
+    const evs = (r.body as { events: { id: string; start: string; end: string; owner: string }[] }).events;
+    expect(evs.find((e) => e.id === "old1")).toMatchObject({ start: "09:00", end: "09:30" });
+    expect(evs.find((e) => e.id === "old2")).toMatchObject({ start: "12:00", end: "13:00", owner: "us" });
+    expect((await handle(req("PATCH", "/events/old2", { body: { title: "Renamed" } }))).status).toBe(200);
+  });
+});
+

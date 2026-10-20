@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run src functions/src",
     "test:rules": "firebase emulators:exec --only firestore,storage --project demo-cagie \"vitest run tests/rules\"",
-    "emulators": "npm --prefix functions run build && firebase emulators:start --project demo-cagie"
+    "emulators": "npm --prefix functions run build && firebase emulators:start --project demo-cagie",
+    "test:repo": "firebase emulators:exec --only firestore --project demo-cagie \"vitest run functions/test-emulator\""
   },
   "dependencies": {
     "date-fns": "^4.4.0",

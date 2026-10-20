@@ -6,7 +6,7 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   test: {
-    include: ["src/**/*.test.ts", "functions/src/**/*.test.ts", "tests/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "functions/src/**/*.test.ts", "functions/test-emulator/**/*.test.ts", "tests/**/*.test.ts"],
     // Rules tests talk to the emulators; give them room.
     testTimeout: 20_000,
   },

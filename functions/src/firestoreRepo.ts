@@ -35,7 +35,8 @@ export function createFirestoreRepo(db: Firestore): ScheduleRepo {
         const [codeSnap, old] = await Promise.all([tx.get(codeRef), tx.get(links.where("uid", "==", uid))]);
         if (!codeSnap.exists || codeSnap.get("expiresAt") <= now) throw new Error("link code no longer valid");
         tx.delete(codeRef);
-        old.docs.forEach((d) => tx.delete(d.ref));
+        // Relinking the same number: keep those docs (they are rewritten below), drop the rest.
+        old.docs.filter((d) => !hashes.includes(d.id)).forEach((d) => tx.delete(d.ref));
         hashes.forEach((h) => tx.set(links.doc(h), { uid, coupleId, linkedAt: now }));
         tx.update(db.collection("users").doc(uid), { whatsappLinkedAt: now });
       });
@@ -68,18 +69,14 @@ export function createFirestoreRepo(db: Firestore): ScheduleRepo {
       const snap = await events(coupleId).doc(id).get();
       return snap.exists ? { ...(snap.data() as Omit<StoredEvent, "id">), id: snap.id } : null;
     },
-    async createEvent(coupleId, data) {
-      const ref = await events(coupleId).add(clean(data));
+    async commit(coupleId, change, audit) {
+      const batch = db.batch();
+      const ref = change.kind === "create" ? events(coupleId).doc() : events(coupleId).doc(change.id);
+      if (change.kind === "delete") batch.delete(ref);
+      else batch.set(ref, clean(change.data));
+      batch.set(db.collection("couples").doc(coupleId).collection("botAudit").doc(), clean({ ...audit, eventId: ref.id }));
+      await batch.commit();
       return ref.id;
-    },
-    async updateEvent(coupleId, id, data) {
-      await events(coupleId).doc(id).set(clean(data));
-    },
-    async deleteEvent(coupleId, id) {
-      await events(coupleId).doc(id).delete();
-    },
-    async audit(coupleId, entry) {
-      await db.collection("couples").doc(coupleId).collection("botAudit").add(clean(entry));
     },
   };
 }
