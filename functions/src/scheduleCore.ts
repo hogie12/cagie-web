@@ -14,7 +14,7 @@ export interface ApiEvent {
   start: string;
   end: string;
   allDay: boolean;
-  owner: "me" | "us";
+  owner: "me" | "us" | "partner"; // partner events are read-only
   repeat: RepeatType;
   occurrence?: string;
 }
@@ -91,10 +91,13 @@ export function canModify(event: StoredEvent, actorUid: string): boolean {
   return ownedBy(event.ownerId, actorUid);
 }
 
-/** Events and occurrences in [from, to] that belong to the actor or are shared. Never returns descriptions. */
+/**
+ * Events and occurrences in [from, to] of the actor's couple: their own, shared, and the partner's (read-only;
+ * canModify still refuses them). Events without a knowable owner are left out. Never returns descriptions.
+ */
 export function listForActor(events: StoredEvent[], actorUid: string, from: string, to: string): ApiEvent[] {
   return expandRecurringEvents(events.map(normalizeStored), from, to)
-    .filter((e) => ownedBy(e.ownerId, actorUid))
+    .filter((e) => !!e.ownerId)
     .map((e) => ({
       id: e.originalEventId ?? e.id,
       title: e.title,
@@ -102,7 +105,7 @@ export function listForActor(events: StoredEvent[], actorUid: string, from: stri
       start: e.startTime,
       end: e.endTime,
       allDay: !!e.allDay,
-      owner: e.ownerId === "us" ? "us" : "me",
+      owner: e.ownerId === "us" ? "us" : e.ownerId === actorUid ? "me" : "partner",
       repeat: e.repeatType ?? "none",
       ...(e.isOccurrence ? { occurrence: e.dateStr } : {}),
     }));
