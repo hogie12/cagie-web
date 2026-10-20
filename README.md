@@ -106,6 +106,8 @@ openssl rand -hex 32 | firebase functions:secrets:set LINK_SALT --data-file=-
 firebase deploy --only firestore:rules,functions
 ```
 
+`functions/.env` holds the non-secret `SCHEDULE_TZ` parameter (committed on purpose; it contains no secrets).
+
 Then set `NEXT_PUBLIC_WA_ASSISTANT_NUMBER` (the assistant's number, e.g. `6281234567890`) in Vercel and redeploy, and
 give the bot the `scheduleApi` URL and the same `SCHEDULE_TOKEN` (read it with
 `firebase functions:secrets:access SCHEDULE_TOKEN`). Deploy rules and functions before the UI.
