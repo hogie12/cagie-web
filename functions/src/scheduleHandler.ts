@@ -30,6 +30,8 @@ export interface ScheduleRepo {
    * "set" replaces the whole document. The repo adds `eventId` to the audit entry.
    */
   commit(coupleId: string, change: EventChange, audit: Record<string, unknown>): Promise<string>;
+  /** Most recent audit entries of the couple, newest first. */
+  listAudit(coupleId: string, limit: number): Promise<Record<string, unknown>[]>;
 }
 
 export interface HttpReq {
@@ -74,6 +76,13 @@ function pickInput(body: unknown): EventInput {
   return out as EventInput;
 }
 
+/** "Title · 2026-10-21 09:00-10:00": titles and times only, never descriptions. */
+function auditSummary(e: Partial<StoredEvent> | null): string {
+  if (!e) return "";
+  const when = e.allDay ? "all day" : `${e.startTime ?? ""}-${e.endTime ?? ""}`;
+  return `${e.title ?? ""} · ${e.dateStr ?? ""} ${when}`.trim();
+}
+
 function withoutId(e: StoredEvent): NewEvent {
   const { id: _id, ...rest } = e;
   void _id;
@@ -112,7 +121,7 @@ export function createScheduleHandler({ repo, token, salt, tz, now }: Deps) {
     const path = req.path.replace(/\/+$/, "") || "/";
     const method = req.method.toUpperCase();
     const eventMatch = /^\/events\/([^/]+)$/.exec(path);
-    const known = ["/link", "/unlink", "/me", "/events"].includes(path) || !!eventMatch;
+    const known = ["/link", "/unlink", "/me", "/events", "/audit"].includes(path) || !!eventMatch;
     if (!known) return json(404, { error: "not_found" });
 
     if (path === "/link") return method === "POST" ? link(req.body) : json(405, { error: "method_not_allowed" });
@@ -131,6 +140,19 @@ export function createScheduleHandler({ repo, token, salt, tz, now }: Deps) {
     if (path === "/me") {
       if (method !== "GET") return json(405, { error: "method_not_allowed" });
       return json(200, await repo.getUserNames(uid, coupleId));
+    }
+    if (path === "/audit") {
+      if (method !== "GET") return json(405, { error: "method_not_allowed" });
+      const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit ?? "30", 10) || 30));
+      const [rows, names] = await Promise.all([repo.listAudit(coupleId, limit), repo.getUserNames(uid, coupleId)]);
+      return json(200, {
+        entries: rows.map((r) => ({
+          ts: r.ts,
+          who: r.uid === uid ? names.name : names.partnerName ?? "Partner",
+          action: r.action,
+          summary: auditSummary((r.after ?? r.before) as Partial<StoredEvent> | null),
+        })),
+      });
     }
     if (path === "/events") {
       if (method === "GET") {
