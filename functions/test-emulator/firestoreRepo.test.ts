@@ -43,4 +43,13 @@ describe("firestoreRepo", () => {
     await repo.commit("c1", { kind: "delete", id }, { uid: "alice", action: "delete" });
     expect((await db.doc(`couples/c1/events/${id}`).get()).exists).toBe(false);
   });
+
+  it("listAudit returns the newest entries first and respects the limit", async () => {
+    const ev = { title: "X", description: "", dateStr: "2026-10-21", startTime: "09:00", endTime: "10:00", allDay: false, owner: "me", ownerId: "alice" };
+    for (const [ts, action] of [[10, "create"], [30, "update"], [20, "skip"]] as const) {
+      await repo.commit("c9", { kind: "create", data: ev }, { ts, uid: "alice", action });
+    }
+    const rows = await repo.listAudit("c9", 2);
+    expect(rows.map((r) => r.ts)).toEqual([30, 20]);
+  });
 });

@@ -37,6 +37,7 @@ function fakeRepo() {
     async getUserNames(uid) { return uid === ME ? { name: "Hogie", partnerName: "Partner" } : { name: "?", partnerName: null }; },
     async listEvents() { return [...s.events.values()]; },
     async getEvent(_c, id) { return s.events.get(id) ?? null; },
+    async listAudit(_c, limit) { return s.audit.slice().reverse().slice(0, limit) as never; },
     async commit(_c, change, entry) {
       s.commits++;
       if (s.failCommit) throw new Error("boom");
@@ -214,6 +215,29 @@ describe("review fixes", () => {
     expect(evs.find((e) => e.id === "old1")).toMatchObject({ start: "09:00", end: "09:30" });
     expect(evs.find((e) => e.id === "old2")).toMatchObject({ start: "12:00", end: "13:00", owner: "us" });
     expect((await handle(req("PATCH", "/events/old2", { body: { title: "Renamed" } }))).status).toBe(200);
+  });
+});
+
+describe("GET /audit", () => {
+  beforeEach(linkMe);
+  it("returns the couple's recent bot changes, newest first, with names and no descriptions", async () => {
+    s.audit.push(
+      { ts: 1000, uid: ME, action: "create", eventId: "a", before: null, after: { ...base, title: "Dentist", description: "SECRET" } },
+      { ts: 2000, uid: PARTNER, action: "delete", eventId: "b", before: { ...base, title: "Gym", description: "SECRET" }, after: null },
+      { ts: 3000, uid: ME, action: "skip", eventId: "c", before: { ...base, title: "Run", repeatType: "daily" }, after: { ...base, title: "Run", repeatType: "daily" } },
+    );
+    const r = await handle(req("GET", "/audit", { query: { limit: "2" } }));
+    expect(r.status).toBe(200);
+    const entries = (r.body as { entries: { ts: number; who: string; action: string; summary: string }[] }).entries;
+    expect(entries.map((e) => [e.ts, e.who, e.action])).toEqual([[3000, "Hogie", "skip"], [2000, "Partner", "delete"]]);
+    expect(entries[0].summary).toBe("Run · 2026-10-21 09:00-10:00");
+    expect(entries[1].summary).toBe("Gym · 2026-10-21 09:00-10:00");
+    expect(JSON.stringify(r.body)).not.toContain("SECRET");
+  });
+  it("needs a linked actor, GET only, and clamps the limit", async () => {
+    expect((await handle(req("POST", "/audit"))).status).toBe(405);
+    s.links.clear();
+    expect((await handle(req("GET", "/audit"))).status).toBe(403);
   });
 });
 

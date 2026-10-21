@@ -69,6 +69,10 @@ export function createFirestoreRepo(db: Firestore): ScheduleRepo {
       const snap = await events(coupleId).doc(id).get();
       return snap.exists ? { ...(snap.data() as Omit<StoredEvent, "id">), id: snap.id } : null;
     },
+    async listAudit(coupleId, limit) {
+      const snap = await db.collection("couples").doc(coupleId).collection("botAudit").orderBy("ts", "desc").limit(limit).get();
+      return snap.docs.map((d) => d.data());
+    },
     async commit(coupleId, change, audit) {
       const batch = db.batch();
       const ref = change.kind === "create" ? events(coupleId).doc() : events(coupleId).doc(change.id);
